@@ -6,12 +6,7 @@ import {
   RichiestaEsameComplementare,
 } from "../types/Storage";
 import { DoctorService, PreferenceService } from "./OfflineServices";
-import { calcolaStimePesoFetale } from "../utils/fetalWeightUtils";
-import {
-  parseGestationalWeeks,
-  getCentileForWeight,
-  getCentileLabel,
-} from "../utils/fetalGrowthCentiles";
+
 
 // ─── Layout Constants ───────────────────────────────────────────────────────
 const MARGIN_L = 15;
@@ -27,7 +22,7 @@ const ACCENT_COLOR = [240, 240, 240]; // Very Light Gray
 const BORDER_COLOR = [200, 200, 200]; // Light Gray
 
 interface VisitPdfOptions {
-  includeEcografiaImages?: boolean;
+  includeImages?: boolean;
 }
 
 interface FooterVisibilityOptions {
@@ -157,12 +152,7 @@ export class PdfService {
 
   // ─── Drawing Primitives ─────────────────────────────────────────────────
 
-  /** Draws a horizontal rule across the page */
-  private static hr(doc: jsPDF, y: number, color = BORDER_COLOR) {
-    doc.setDrawColor(color[0], color[1], color[2]);
-    doc.setLineWidth(0.1);
-    doc.line(MARGIN_L, y, MARGIN_R, y);
-  }
+
 
   /** Page break check — returns new Y or same Y */
   private static pageBreak(doc: jsPDF, y: number, needed = 40): number {
@@ -416,8 +406,8 @@ export class PdfService {
     return y + rowHeight + 6; // Reduced spacing after
   }
 
-  /** Draw image gallery section for ecografia attachments */
-  private static drawEcografiaImages(
+  /** Draw image gallery section for attachments */
+  private static drawImages(
     doc: jsPDF,
     images: string[] | undefined,
     y: number,
@@ -430,7 +420,7 @@ export class PdfService {
     doc.setFont("helvetica", "bold");
     doc.setFontSize(9);
     doc.setTextColor(PRIMARY_COLOR[0], PRIMARY_COLOR[1], PRIMARY_COLOR[2]);
-    doc.text("IMMAGINI ECOGRAFIA", MARGIN_L + 4, y + 3.5);
+    doc.text("IMMAGINI ALLEGATE", MARGIN_L + 4, y + 3.5);
     y += 8;
 
     const gap = 4;
@@ -508,277 +498,108 @@ export class PdfService {
     doc.text(this.s(footerText), 105, footerY + 6, { align: "center" });
   }
 
-  // ─── Normalizzazione visite “piatte” (es. da import CSV) ─────────────────
-  private static buildGinecologiaFromFlat(visit: Visit): NonNullable<Visit["ginecologia"]> {
-    const a = visit.anamnesi ?? "";
-    const e = visit.esamiObiettivo ?? "";
-    const c = visit.conclusioniDiagnostiche ?? "";
-    const t = visit.terapie ?? "";
-    const terapiaSpecifica = [c, t].filter(Boolean).join("\n");
-    return {
-      gravidanze: 0,
-      parti: 0,
-      aborti: 0,
-      ultimaMestruazione: "",
-      prestazione: a,
-      problemaClinico: visit.descrizioneClinica ?? "",
-      chirurgiaPregessa: "",
-      allergie: "",
-      familiarita: "",
-      terapiaInAtto: "",
-      vaccinazioneHPV: true,
-      esameBimanuale: e,
-      speculum: "",
-      ecografiaTV: "",
-      accertamenti: "",
-      conclusione: c,
-      terapiaSpecifica,
-      ecografiaImmagini: [],
-    };
-  }
-
-  /** Costruisce un oggetto ostetricia minimo dai campi piatti della visita. */
-  private static buildOstetriciaFromFlat(visit: Visit): NonNullable<Visit["ostetricia"]> {
-    const a = visit.anamnesi ?? "";
-    const e = visit.esamiObiettivo ?? "";
-    const conclusioneTerapie = [visit.conclusioniDiagnostiche, visit.terapie].filter(Boolean).join("\n");
-    return {
-      settimaneGestazione: "",
-      ultimaMestruazione: "",
-      dataPresunta: "",
-      problemaClinico: visit.descrizioneClinica ?? "",
-      gravidanzePrec: 0,
-      partiPrec: 0,
-      abortiPrec: 0,
-      pesoPreGravidanza: 0,
-      pesoAttuale: 0,
-      pressioneArteriosa: "",
-      altezzaUterina: "",
-      battitiFetali: "",
-      movimentiFetali: "",
-      esamiEseguiti: "",
-      ecografiaOffice: e,
-      noteOstetriche: conclusioneTerapie,
-      prestazione: a,
-      esameObiettivo: e,
-      ecografiaImmagini: [],
-      biometriaFetale: { bpdMm: 0, hcMm: 0, acMm: 0, flMm: 0 },
-    };
-  }
-
-  /** Restituisce la visita con ginecologia/ostetricia compilati da flat se mancanti (es. visite da CSV). */
-  private static normalizeVisitForPdf(visit: Visit): Visit {
-    const isGyn =
-      visit.tipo === "ginecologica" || visit.tipo === "ginecologica_pediatrica";
-    const isObs = visit.tipo === "ostetrica";
-    const ginecologia =
-      visit.ginecologia ?? (isGyn ? this.buildGinecologiaFromFlat(visit) : undefined);
-    const ostetricia =
-      visit.ostetricia ?? (isObs ? this.buildOstetriciaFromFlat(visit) : undefined);
-    if (ginecologia || ostetricia) {
-      return { ...visit, ginecologia, ostetricia };
-    }
-    return visit;
-  }
-
   //  PUBLIC METHODS
   // ═══════════════════════════════════════════════════════════════════════
 
-  static async generateGynecologicalPDF(
+  static async generatePediatricPDF(
     patient: Patient,
     visit: Visit,
     options?: VisitPdfOptions,
   ) {
-    const normalized = this.normalizeVisitForPdf(visit);
-    if (!normalized.ginecologia) return;
-
-    const gyn = normalized.ginecologia;
-    const isPediatric = visit.tipo === "ginecologica_pediatrica";
     const [doctor, prefs] = await Promise.all([
       DoctorService.getDoctor(),
       PreferenceService.getPreferences(),
     ]);
     const doc = new jsPDF();
 
+    let title = "VISITA PEDIATRICA";
+    if (visit.tipo === "bilancio_salute") title = "BILANCIO DI SALUTE";
+    else if (visit.tipo === "patologia") title = "VISITA PER PATOLOGIA";
+    else if (visit.tipo === "controllo") title = "CONTROLLO PEDIATRICO";
+    else if (visit.tipo === "urgenza") title = "VISITA URGENTE";
+
     let y = this.drawHeader(
       doc,
-      isPediatric ? "VISITA GINECOLOGICA PEDIATRICA" : "VISITA GINECOLOGICA",
-      "Referto Specialistico",
+      title,
+      "Referto",
       doctor,
     );
     y = this.drawPatientBox(doc, patient, visit.dataVisita, y);
 
-    // ── Anamnesi Grid ──
-    if (isPediatric) {
-      y = this.drawGridRow(
-        doc,
-        [
-          { label: "MENARCA", value: gyn.menarca ?? "-" },
-          {
-            label: "VACCINAZIONE HPV",
-            value: gyn.vaccinazioneHPV ? "SI" : "NO",
-          },
-          {
-            label: "STADIO DI TANNER (F)",
-            value: gyn.stadioTannerFemmina ?? "-",
-          },
-        ],
-        y,
-      );
-    } else {
-      const partiValue =
-        gyn.partiSpontanei != null || gyn.partiCesarei != null
-          ? `${gyn.parti} (${gyn.partiSpontanei ?? 0} PS, ${gyn.partiCesarei ?? 0} TC)`
-          : String(gyn.parti);
-      const abortiValue =
-        gyn.abortiSpontanei != null || gyn.ivg != null
-          ? `${gyn.aborti} (${gyn.abortiSpontanei ?? 0} AS, ${gyn.ivg ?? 0} IVG)`
-          : String(gyn.aborti);
-      y = this.drawGridRow(
-        doc,
-        [
-          { label: "GRAVIDANZE (G)", value: String(gyn.gravidanze) },
-          { label: "PARTI (P)", value: partiValue },
-          { label: "ABORTI (A)", value: abortiValue },
-          {
-            label: "ULTIMA MESTRUAZIONE",
-            value: this.formatDate(gyn.ultimaMestruazione),
-          },
-        ],
-        y,
-      );
+    const ped = visit.pediatria;
+
+    if (ped) {
+      if (visit.tipo === "bilancio_salute") {
+        // ── Auxological Parameters Grid ──
+        const formatPercentile = (p?: string | number | null) => (p != null && String(p).trim() !== "" ? `${p}°` : "-");
+        y = this.drawGridRow(
+          doc,
+          [
+            { label: "PESO", value: ped.peso != null ? `${ped.peso} kg` + (ped.percentilePeso ? ` (${formatPercentile(ped.percentilePeso)})` : "") : "-" },
+            { label: "ALTEZZA", value: ped.altezza != null ? `${ped.altezza} cm` + (ped.percentileAltezza ? ` (${formatPercentile(ped.percentileAltezza)})` : "") : "-" },
+            { label: "C. CRANICA", value: ped.circonferenzaCranica != null ? `${ped.circonferenzaCranica} cm` + (ped.percentileCC ? ` (${formatPercentile(ped.percentileCC)})` : "") : "-" },
+            { label: "BMI", value: ped.bmi != null ? `${ped.bmi}` + (ped.percentileBmi ? ` (${formatPercentile(ped.percentileBmi)})` : "") : "-" },
+          ],
+          y,
+        );
+      } else {
+        const parametriRows = [];
+        if (ped.peso != null) parametriRows.push({ label: "PESO", value: `${ped.peso} kg` });
+        if (ped.altezza != null) parametriRows.push({ label: "ALTEZZA", value: `${ped.altezza} cm` });
+        if (parametriRows.length > 0) {
+          y = this.drawGridRow(doc, parametriRows, y);
+        }
+      }
+
+      const vitali = [];
+      if (ped.temperatura) vitali.push(`Temp: ${ped.temperatura} °C`);
+      if (ped.saturazioneO2) vitali.push(`SpO2: ${ped.saturazioneO2}%`);
+      if (ped.pressioneArteriosa) vitali.push(`PA: ${ped.pressioneArteriosa}`);
+
+      if (vitali.length > 0) {
+        y = this.drawSection(doc, "PARAMETRI VITALI", vitali.join("   |   "), y);
+      }
+
+      if (visit.tipo === "bilancio_salute") {
+        if (ped.allattamento || ped.svezzamento || ped.tappeSviluppo) {
+          let nutrizioneStr = "";
+          if (ped.allattamento) nutrizioneStr += `Allattamento:\n${ped.allattamento}\n\n`;
+          if (ped.svezzamento) nutrizioneStr += `Alimentazione/Svezzamento:\n${ped.svezzamento}\n\n`;
+          if (ped.tappeSviluppo) nutrizioneStr += `Tappe di Sviluppo:\n${ped.tappeSviluppo}\n`;
+          y = this.drawSection(doc, "SVILUPPO E NUTRIZIONE", nutrizioneStr.trim(), y);
+        }
+      }
+
+      if (ped.vaccinazioni) {
+        y = this.drawSection(doc, "STATO VACCINALE", ped.vaccinazioni, y);
+      }
     }
 
-    const SIEOG_NOTE =
-      "Ecografia Office di supporto alla visita clinica. Non sostituisce le ecografie di screening previste dalle Linee Guida SIEOG, e di ciò si informa la persona assistita.";
-    y = this.drawSection(doc, "ANAMNESI", gyn.prestazione, y);
-    y = this.drawSection(doc, "Anamnesi e Dati Clinici", gyn.problemaClinico, y);
-    y = this.drawSection(doc, "ECOGRAFIA OFFICE / ESAME OBIETTIVO", gyn.esameBimanuale, y, SIEOG_NOTE);
-    if (options?.includeEcografiaImages) {
-      y = this.drawEcografiaImages(doc, gyn.ecografiaImmagini, y);
-    }
-    y = this.drawSection(doc, "Conclusioni e Terapia", gyn.terapiaSpecifica, y);
-    this.drawFooter(doc, doctor, {
-      showDoctorPhoneInPdf: prefs?.showDoctorPhoneInPdf as boolean | undefined,
-      showDoctorEmailInPdf: prefs?.showDoctorEmailInPdf as boolean | undefined,
-    });
-    return doc.output("blob") as Blob;
-  }
-
-  static async generateObstetricPDF(
-    patient: Patient,
-    visit: Visit,
-    options?: VisitPdfOptions,
-  ) {
-    const normalized = this.normalizeVisitForPdf(visit);
-    if (!normalized.ostetricia) return;
-    const obs = normalized.ostetricia;
-    const [doctor, prefs] = await Promise.all([
-      DoctorService.getDoctor(),
-      PreferenceService.getPreferences(),
-    ]);
-    const formulaPesoFetale =
-      (prefs?.formulaPesoFetale as string) || "hadlock4";
-    const doc = new jsPDF();
-
-    let y = this.drawHeader(
-      doc,
-      "VISITA OSTETRICA",
-      "Monitoraggio della Gravidanza",
-      doctor,
-    );
-    y = this.drawPatientBox(doc, patient, visit.dataVisita, y);
-
-    // ── Anamnesi Ostetrica Grid ──
-    const partiPrecValue =
-      obs.partiPrecSpontanei != null || obs.partiPrecCesarei != null
-        ? `${obs.partiPrec} (${obs.partiPrecSpontanei ?? 0} PS, ${obs.partiPrecCesarei ?? 0} TC)`
-        : String(obs.partiPrec);
-    const abortiPrecValue =
-      obs.abortiPrecSpontanei != null || obs.ivgPrec != null
-        ? `${obs.abortiPrec} (${obs.abortiPrecSpontanei ?? 0} AS, ${obs.ivgPrec ?? 0} IVG)`
-        : String(obs.abortiPrec);
-    y = this.drawGridRow(
-      doc,
-      [
-        { label: "GRAVIDANZE PREC.", value: String(obs.gravidanzePrec) },
-        { label: "PARTI PREC.", value: partiPrecValue },
-        { label: "ABORTI PREC.", value: abortiPrecValue },
-        {
-          label: "ULTIMA MESTRUAZIONE",
-          value: this.formatDate(obs.ultimaMestruazione),
-        },
-      ],
-      y,
-    );
-
-    // ── Pregnancy Parameters Grid (con Peso fetale stimato) ──
-    const biometria = obs.biometriaFetale ?? {
-      bpdMm: 0,
-      hcMm: 0,
-      acMm: 0,
-      flMm: 0,
-    };
-    const stimePeso = calcolaStimePesoFetale(biometria);
-    const stima = stimePeso[formulaPesoFetale] ?? stimePeso.hadlock4;
-    let pesoFetaleValue = "-";
-    if (stima?.calcolabile && stima.pesoGrammi != null) {
-      const ga = parseGestationalWeeks(obs.settimaneGestazione ?? "");
-      const centile =
-        ga != null ? getCentileForWeight(stima.pesoGrammi, ga) : null;
-      const centileStr = getCentileLabel(centile);
-      pesoFetaleValue = centileStr
-        ? `${stima.pesoGrammi} g (${centileStr} centile)`
-        : `${stima.pesoGrammi} g`;
+    if (visit.anamnesi) {
+      y = this.drawSection(doc, "ANAMNESI", visit.anamnesi, y);
     }
 
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(9);
-    doc.setTextColor(
-      SECONDARY_COLOR[0],
-      SECONDARY_COLOR[1],
-      SECONDARY_COLOR[2],
-    );
-    doc.text("PARAMETRI ATTUALI", MARGIN_L, y - 2);
-
-    y = this.drawGridRow(
-      doc,
-      [
-        { label: "SETT. GESTAZIONE", value: obs.settimaneGestazione },
-        { label: "DATA PRESUNTA", value: this.formatDate(obs.dataPresunta) },
-        { label: "PRESSIONE", value: obs.pressioneArteriosa },
-        {
-          label: "PESO ATTUALE",
-          value: obs.pesoAttuale ? `${obs.pesoAttuale} kg` : "-",
-        },
-        {
-          label: "INCREM. PONDERALE",
-          value:
-            obs.pesoAttuale && obs.pesoPreGravidanza
-              ? `${(Number(obs.pesoAttuale) - Number(obs.pesoPreGravidanza)).toFixed(1)} kg`
-              : "-",
-        },
-        { label: "PESO FETALE STIMATO", value: pesoFetaleValue },
-      ],
-      y,
-    );
-
-    // ── Sections ──
-    y = this.drawSection(doc, "ANAMNESI", obs.prestazione, y);
-    y = this.drawSection(doc, "Dati Clinici", obs.problemaClinico, y);
-    const SIEOG_NOTE =
-      "Ecografia Office di supporto alla visita clinica. Non sostituisce le ecografie di screening previste dalle Linee Guida SIEOG, e di ciò si informa la persona assistita.";
-    y = this.drawSection(
-      doc,
-      "ECOGRAFIA OFFICE / ESAME OBIETTIVO",
-      obs.esameObiettivo,
-      y,
-      SIEOG_NOTE,
-    );
-    if (options?.includeEcografiaImages) {
-      y = this.drawEcografiaImages(doc, obs.ecografiaImmagini, y);
+    if (visit.descrizioneClinica) {
+      y = this.drawSection(doc, "DESCRIZIONE PROBLEMA / DATI CLINICI", visit.descrizioneClinica, y);
     }
-    y = this.drawSection(doc, "Conclusioni e Terapia", obs.noteOstetriche, y);
+
+    if (visit.esamiObiettivo) {
+      y = this.drawSection(doc, "VISITA", visit.esamiObiettivo, y);
+    }
+
+    const conclusioniMerge = [visit.conclusioniDiagnostiche, visit.terapie].filter(Boolean).join('\n\n');
+    if (conclusioniMerge) {
+      y = this.drawSection(doc, "CONCLUSIONI E TERAPIE", conclusioniMerge, y);
+    }
+
+    if (ped?.notePediatriche) {
+      y = this.drawSection(doc, "NOTE CLINICHE / EDUCAZIONE SANITARIA", ped.notePediatriche, y);
+    }
+
+    if (options?.includeImages && ped?.immagini) {
+      y = this.drawImages(doc, ped.immagini, y);
+    }
+
     this.drawFooter(doc, doctor, {
       showDoctorPhoneInPdf: prefs?.showDoctorPhoneInPdf as boolean | undefined,
       showDoctorEmailInPdf: prefs?.showDoctorEmailInPdf as boolean | undefined,

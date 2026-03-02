@@ -58,19 +58,10 @@ import {
   RichiestaEsameComplementare,
   MedicalTemplate,
 } from "../../types/Storage";
-import { calcolaStimePesoFetale } from "../../utils/fetalWeightUtils";
-import {
-  parseGestationalWeeks,
-  getCentileForWeight,
-  getCentileLabel,
-} from "../../utils/fetalGrowthCentiles";
 import { useToast } from "../../contexts/ToastContext";
 import { Breadcrumb } from "../../components/Breadcrumb";
 import { CodiceFiscaleValue } from "../../components/CodiceFiscaleValue";
 import { getDoctorProfileIncompleteMessage, isDoctorProfileComplete } from "../../utils/doctorProfile";
-
-const SIEOG_NOTE =
-  "Ecografia Office di supporto alla visita clinica. Non sostituisce le ecografie di screening previste dalle Linee Guida SIEOG, e di ciò si informa la persona assistita.";
 
 function formatPdfDate(dateString: string): string {
   if (!dateString) return "N/D";
@@ -160,17 +151,13 @@ export default function PatientHistory() {
   );
   const [modelloEsameSelezionato, setModelloEsameSelezionato] = useState("");
   const [savingEsame, setSavingEsame] = useState(false);
-  const [isIncludeImagesModalOpen, setIsIncludeImagesModalOpen] =
-    useState(false);
+  const [isIncludeImagesModalOpen, setIsIncludeImagesModalOpen] = useState(false);
   const [includeImagesCount, setIncludeImagesCount] = useState(0);
-  const [fetalFormulaPref, setFetalFormulaPref] = useState("hadlock4");
   const [pendingPrintVisit, setPendingPrintVisit] = useState<Visit | null>(null);
-  /** URL del PDF generato per l’anteprima (stesso contenuto della stampa). Revocare in cleanup. */
   const [previewPdfBlobUrl, setPreviewPdfBlobUrl] = useState<string | null>(null);
   const [previewPdfLoading, setPreviewPdfLoading] = useState(false);
   const [showDoctorPhoneInPdf, setShowDoctorPhoneInPdf] = useState(true);
   const [showDoctorEmailInPdf, setShowDoctorEmailInPdf] = useState(true);
-  // Gestione Templates Esami (via Settings/Storage)
   const [examTemplates, setExamTemplates] = useState<MedicalTemplate[]>([]);
   const navigate = useNavigate();
   const { showToast } = useToast();
@@ -185,7 +172,6 @@ export default function PatientHistory() {
     try {
       setLoading(true);
 
-      // Recupera il paziente per id (UUID) o, per retrocompatibilità, per codice fiscale
       let patientData = await PatientService.getPatientById(patientIdParam);
       if (!patientData) {
         patientData = await PatientService.getPatientByCF(patientIdParam);
@@ -200,11 +186,9 @@ export default function PatientHistory() {
       const doc = await DoctorService.getDoctor();
       setDoctor(doc);
 
-      // Recupera le visite del paziente
       const visitsData = await VisitService.getVisitsByPatientId(
         patientData.id,
       );
-      // Ordina le visite per data (più recenti prima), usando createdAt come tie-breaker
       const sortedVisits = visitsData.sort((a, b) => {
         const dateDiff =
           new Date(b.dataVisita).getTime() - new Date(a.dataVisita).getTime();
@@ -229,7 +213,6 @@ export default function PatientHistory() {
 
   useEffect(() => {
     loadData();
-    // Carica template esami
     TemplateService.getAllTemplates()
       .then((results) => {
         setExamTemplates(
@@ -242,28 +225,18 @@ export default function PatientHistory() {
   useEffect(() => {
     PreferenceService.getPreferences()
       .then((prefs) => {
-        if (prefs?.formulaPesoFetale)
-          setFetalFormulaPref(prefs.formulaPesoFetale as string);
+        if (typeof prefs?.showDoctorPhoneInPdf === "boolean") {
+          setShowDoctorPhoneInPdf(prefs.showDoctorPhoneInPdf);
+        }
+        if (typeof prefs?.showDoctorEmailInPdf === "boolean") {
+          setShowDoctorEmailInPdf(prefs.showDoctorEmailInPdf);
+        }
       })
-      .catch(() => {});
-    PreferenceService.getPreferences().then((prefs) => {
-      if (prefs?.formulaPesoFetale) setFetalFormulaPref(prefs.formulaPesoFetale as string);
-      if (typeof prefs?.showDoctorPhoneInPdf === "boolean") {
-        setShowDoctorPhoneInPdf(prefs.showDoctorPhoneInPdf as boolean);
-      }
-      if (typeof prefs?.showDoctorEmailInPdf === "boolean") {
-        setShowDoctorEmailInPdf(prefs.showDoctorEmailInPdf as boolean);
-      }
-    }).catch(() => {});
+      .catch(() => { });
   }, []);
 
-  // Genera il PDF di anteprima (stesso della stampa) quando si apre il modale su visita ginecologica/ostetrica
   useEffect(() => {
-    const isGyn =
-      selectedVisit?.tipo === "ginecologica" ||
-      selectedVisit?.tipo === "ginecologica_pediatrica";
-    const isObs = selectedVisit?.tipo === "ostetrica";
-    if (!isOpen || !selectedVisit || !patient || (!isGyn && !isObs)) {
+    if (!isOpen || !selectedVisit || !patient) {
       setPreviewPdfBlobUrl((prev) => {
         if (prev) URL.revokeObjectURL(prev);
         return null;
@@ -275,14 +248,10 @@ export default function PatientHistory() {
     setPreviewPdfLoading(true);
     (async () => {
       try {
-        const blob =
-          isGyn
-            ? await PdfService.generateGynecologicalPDF(patient, selectedVisit, {
-                includeEcografiaImages: true,
-              })
-            : await PdfService.generateObstetricPDF(patient, selectedVisit, {
-                includeEcografiaImages: true,
-              });
+        // Will be implemented in PdfService.ts
+        const blob = await (PdfService as any).generatePediatricPDF?.(patient, selectedVisit, {
+          includeImages: true,
+        });
         if (blob && !revoked) {
           const url = URL.createObjectURL(blob);
           setPreviewPdfBlobUrl(url);
@@ -297,58 +266,7 @@ export default function PatientHistory() {
     return () => {
       revoked = true;
       setPreviewPdfBlobUrl((prev) => {
-        if (prev) {
-          URL.revokeObjectURL(prev);
-        }
-        return null;
-      });
-      setPreviewPdfLoading(false);
-    };
-  }, [isOpen, selectedVisit?.id, patient?.id]);
-
-  // Genera il PDF di anteprima (stesso della stampa) quando si apre il modale su visita ginecologica/ostetrica
-  useEffect(() => {
-    const isGyn =
-      selectedVisit?.tipo === "ginecologica" ||
-      selectedVisit?.tipo === "ginecologica_pediatrica";
-    const isObs = selectedVisit?.tipo === "ostetrica";
-    if (!isOpen || !selectedVisit || !patient || (!isGyn && !isObs)) {
-      setPreviewPdfBlobUrl((prev) => {
         if (prev) URL.revokeObjectURL(prev);
-        return null;
-      });
-      setPreviewPdfLoading(false);
-      return;
-    }
-    let revoked = false;
-    setPreviewPdfLoading(true);
-    (async () => {
-      try {
-        const blob =
-          isGyn
-            ? await PdfService.generateGynecologicalPDF(patient, selectedVisit, {
-                includeEcografiaImages: true,
-              })
-            : await PdfService.generateObstetricPDF(patient, selectedVisit, {
-                includeEcografiaImages: true,
-              });
-        if (blob && !revoked) {
-          const url = URL.createObjectURL(blob);
-          setPreviewPdfBlobUrl(url);
-        }
-      } catch (e) {
-        console.error("Errore generazione PDF anteprima:", e);
-        if (!revoked) setPreviewPdfBlobUrl(null);
-      } finally {
-        if (!revoked) setPreviewPdfLoading(false);
-      }
-    })();
-    return () => {
-      revoked = true;
-      setPreviewPdfBlobUrl((prev) => {
-        if (prev) {
-          URL.revokeObjectURL(prev);
-        }
         return null;
       });
       setPreviewPdfLoading(false);
@@ -402,13 +320,6 @@ export default function PatientHistory() {
 
   const handleCloseEsameModal = () => {
     onEsameClose();
-    setEditingRichiestaEsame(null);
-  };
-
-  const handleSelectModelloEsame = (modelloId: string) => {
-    setNuovaRichiestaNome("");
-    setNuovaRichiestaNote("");
-    setModelloEsameSelezionato("");
     setEditingRichiestaEsame(null);
   };
 
@@ -572,7 +483,6 @@ export default function PatientHistory() {
     }
   };
 
-  // ── Patient Edit ──
   const handleOpenEdit = () => {
     if (!patient) return;
     setEditData({
@@ -631,123 +541,24 @@ export default function PatientHistory() {
     }
   };
 
-  const getPreviewAnamnesi = (visit: Visit) => {
-    if (
-      visit.tipo === "ginecologica" ||
-      visit.tipo === "ginecologica_pediatrica"
-    ) {
-      return visit.ginecologia?.prestazione || visit.anamnesi;
-    }
-    if (visit.tipo === "ostetrica") {
-      return visit.ostetricia?.prestazione || visit.anamnesi;
-    }
-    return visit.anamnesi;
-  };
-
-  const getPreviewDatiClinici = (visit: Visit) => {
-    if (
-      visit.tipo === "ginecologica" ||
-      visit.tipo === "ginecologica_pediatrica"
-    ) {
-      return visit.ginecologia?.problemaClinico || visit.descrizioneClinica;
-    }
-    if (visit.tipo === "ostetrica") {
-      return visit.ostetricia?.problemaClinico || visit.descrizioneClinica;
-    }
-    return visit.descrizioneClinica;
-  };
-
-  const getPreviewEsameObiettivo = (visit: Visit) => {
-    if (
-      visit.tipo === "ginecologica" ||
-      visit.tipo === "ginecologica_pediatrica"
-    ) {
-      return visit.ginecologia?.esameBimanuale || visit.esamiObiettivo;
-    }
-    if (visit.tipo === "ostetrica") {
-      return visit.ostetricia?.esameObiettivo || visit.esamiObiettivo;
-    }
-    return visit.esamiObiettivo;
-  };
-
-  const getPreviewConclusioni = (visit: Visit) => {
-    if (
-      visit.tipo === "ginecologica" ||
-      visit.tipo === "ginecologica_pediatrica"
-    ) {
-      return (
-        visit.ginecologia?.terapiaSpecifica || visit.conclusioniDiagnostiche
-      );
-    }
-    if (visit.tipo === "ostetrica") {
-      return visit.ostetricia?.noteOstetriche || visit.conclusioniDiagnostiche;
-    }
-    return visit.conclusioniDiagnostiche;
-  };
-
-  const renderEcografiaGallery = (images?: string[]) => {
-    if (!images || images.length === 0) return null;
-    return (
-      <div className="mx-4 mt-3">
-        <div className="bg-[#f0f0f0] px-2 py-1 font-bold text-[10px] uppercase">
-          Immagini Ecografia
-        </div>
-        <div className="px-2 py-2 border-x border-b border-gray-300">
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-            {images.map((image, index) => (
-              <a
-                key={`ecografia-${index}`}
-                href={image}
-                target="_blank"
-                rel="noreferrer"
-                className="block border border-gray-200 rounded-md overflow-hidden hover:opacity-90 transition-opacity"
-              >
-                <img
-                  src={image}
-                  alt={`Ecografia ${index + 1}`}
-                  className="w-full h-28 object-cover"
-                />
-              </a>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  };
-
   const handleGeneratePdfFromPreview = async (visit: Visit) => {
     if (!patient) return;
     setPdfLoading(true);
     try {
-      let blob: Blob | null = null;
-      let filename = "";
-      if (
-        visit.tipo === "ginecologica" ||
-        visit.tipo === "ginecologica_pediatrica"
-      ) {
-        const b = await PdfService.generateGynecologicalPDF(patient, visit);
-        if (b) blob = b;
-        filename = `Ginecologia_${patient.cognome}_${visit.dataVisita}.pdf`;
-        showToast("PDF ginecologico generato.");
-      } else if (visit.tipo === "ostetrica") {
-        const b = await PdfService.generateObstetricPDF(patient, visit);
-        if (b) blob = b;
-        filename = `Ostetricia_${patient.cognome}_${visit.dataVisita}.pdf`;
-        showToast("PDF ostetrico generato.");
-      } else {
-        showToast(
-          "Generazione PDF disponibile solo per visite ginecologiche e ostetriche.",
-          "info",
-        );
+      const blob = await (PdfService as any).generatePediatricPDF?.(patient, visit);
+      if (!blob) {
+        showToast("Impossibile generare il PDF. PdfService non pronto.", "error");
+        return;
       }
-      if (blob && filename) {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = filename;
-        a.click();
-        URL.revokeObjectURL(url);
-      }
+      const filename = `Pediatria_${patient.cognome}_${visit.dataVisita}.pdf`;
+      showToast("PDF generato.");
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
     } catch (err) {
       console.error("Errore generazione PDF da anteprima:", err);
       showToast("Errore durante la generazione del PDF.", "error");
@@ -758,22 +569,8 @@ export default function PatientHistory() {
 
   const handlePrintPdf = async (visit: Visit) => {
     if (!patient) return;
-    if (
-      visit.tipo !== "ginecologica" &&
-      visit.tipo !== "ginecologica_pediatrica" &&
-      visit.tipo !== "ostetrica"
-    ) {
-      showToast(
-        "Stampa disponibile solo per visite ginecologiche e ostetriche.",
-        "info",
-      );
-      return;
-    }
 
-    const imageCount =
-      visit.tipo === "ginecologica" || visit.tipo === "ginecologica_pediatrica"
-        ? (visit.ginecologia?.ecografiaImmagini?.length ?? 0)
-        : (visit.ostetricia?.ecografiaImmagini?.length ?? 0);
+    const imageCount = visit.pediatria?.immagini?.length ?? 0;
 
     if (imageCount > 0) {
       setIncludeImagesCount(imageCount);
@@ -785,20 +582,14 @@ export default function PatientHistory() {
     await runPrintPdf(visit, false);
   };
 
-  const runPrintPdf = async (visit: Visit, includeEcografiaImages: boolean) => {
+  const runPrintPdf = async (visit: Visit, includeImages: boolean) => {
     if (!patient) return;
     setPdfLoading(true);
     try {
-      const blob =
-        visit.tipo === "ginecologica" ||
-        visit.tipo === "ginecologica_pediatrica"
-          ? await PdfService.generateGynecologicalPDF(patient, visit, {
-              includeEcografiaImages,
-            })
-          : await PdfService.generateObstetricPDF(patient, visit, {
-              includeEcografiaImages,
-            });
-      console.log("blob", blob);
+      const blob = await (PdfService as any).generatePediatricPDF?.(patient, visit, {
+        includeImages,
+      });
+
       if (!blob) {
         showToast("Impossibile generare il PDF per la stampa.", "error");
         return;
@@ -818,11 +609,7 @@ export default function PatientHistory() {
         if (w) {
           setTimeout(() => URL.revokeObjectURL(pdfUrl), 5000);
         } else {
-          const filename =
-            visit.tipo === "ginecologica" ||
-            visit.tipo === "ginecologica_pediatrica"
-              ? `Ginecologia_${patient.cognome}_${visit.dataVisita}.pdf`
-              : `Ostetricia_${patient.cognome}_${visit.dataVisita}.pdf`;
+          const filename = `Pediatria_${patient.cognome}_${visit.dataVisita}.pdf`;
           const a = document.createElement("a");
           a.href = pdfUrl;
           a.download = filename;
@@ -847,6 +634,14 @@ export default function PatientHistory() {
     setPendingPrintVisit(null);
     if (!visit) return;
     await runPrintPdf(visit, include);
+  };
+
+  const getVisitTypeLabel = (tipo?: Visit["tipo"]) => {
+    if (tipo === "bilancio_salute") return "Bilancio di Salute";
+    if (tipo === "patologia") return "Patologia";
+    if (tipo === "controllo") return "Controllo";
+    if (tipo === "urgenza") return "Urgenza";
+    return "Generale";
   };
 
   if (loading) {
@@ -879,10 +674,10 @@ export default function PatientHistory() {
 
   const breadcrumbItems = patient
     ? [
-        { label: "Dashboard", path: "/" },
-        { label: "Pazienti", path: "/pazienti" },
-        { label: `${patient.nome} ${patient.cognome}` },
-      ]
+      { label: "Dashboard", path: "/" },
+      { label: "Pazienti", path: "/pazienti" },
+      { label: `${patient.nome} ${patient.cognome}` },
+    ]
     : [];
 
   return (
@@ -930,14 +725,14 @@ export default function PatientHistory() {
                 {(patient.telefono ||
                   patient.email ||
                   patient.luogoNascita) && (
-                  <div className="text-sm text-gray-500 pt-1 flex flex-wrap gap-x-4">
-                    {patient.luogoNascita && (
-                      <span>📍 {patient.luogoNascita}</span>
-                    )}
-                    {patient.telefono && <span>📞 {patient.telefono}</span>}
-                    {patient.email && <span>✉️ {patient.email}</span>}
-                  </div>
-                )}
+                    <div className="text-sm text-gray-500 pt-1 flex flex-wrap gap-x-4">
+                      {patient.luogoNascita && (
+                        <span>📍 {patient.luogoNascita}</span>
+                      )}
+                      {patient.telefono && <span>📞 {patient.telefono}</span>}
+                      {patient.email && <span>✉️ {patient.email}</span>}
+                    </div>
+                  )}
               </div>
             </div>
 
@@ -968,7 +763,7 @@ export default function PatientHistory() {
                 <FileTextIcon size={20} />
               </div>
               <div>
-                <h2 className="text-lg font-bold text-gray-900">Visite</h2>
+                <h2 className="text-lg font-bold text-gray-900">Visite Pediatriche</h2>
                 <p className="text-xs text-gray-500">
                   {visits.length} registrate
                 </p>
@@ -1038,16 +833,17 @@ export default function PatientHistory() {
                           size="sm"
                           variant="flat"
                           color={
-                            visit.tipo === "ginecologica" ||
-                            visit.tipo === "ginecologica_pediatrica"
-                              ? "danger"
-                              : visit.tipo === "ostetrica"
-                                ? "secondary"
-                                : "primary"
+                            visit.tipo === "bilancio_salute"
+                              ? "success"
+                              : visit.tipo === "patologia"
+                                ? "danger"
+                                : visit.tipo === "urgenza"
+                                  ? "warning"
+                                  : "primary"
                           }
                           className="capitalize font-semibold"
                         >
-                          {visit.tipo || "Generale"}
+                          {getVisitTypeLabel(visit.tipo)}
                         </Chip>
                       </div>
 
@@ -1055,48 +851,27 @@ export default function PatientHistory() {
                       <div className="flex-1 space-y-3">
                         {/* Dettagli specifici per tipo */}
                         <div>
-                          {visit.tipo === "ostetrica" && visit.ostetricia ? (
+                          {visit.pediatria && (
                             <div className="mb-2">
-                              <span className="bg-purple-100 text-purple-700 text-xs font-bold px-2 py-1 rounded-full mr-2">
-                                {visit.ostetricia.settimaneGestazione || "?"}ª
-                                Settimana
-                              </span>
-                              <p className="text-gray-700 mt-1 text-sm font-medium">
-                                {visit.ostetricia.prestazione ||
-                                  visit.anamnesi ||
-                                  "Controllo ostetrico"}
-                              </p>
-                            </div>
-                          ) : (visit.tipo === "ginecologica" ||
-                              visit.tipo === "ginecologica_pediatrica") &&
-                            visit.ginecologia ? (
-                            <div className="mb-2">
-                              <p className="text-gray-700 text-sm font-medium">
-                                {visit.ginecologia.prestazione ||
-                                  visit.anamnesi ||
-                                  (visit.tipo === "ginecologica_pediatrica"
-                                    ? "Visita ginecologica pediatrica"
-                                    : "Visita ginecologica")}
-                              </p>
-                            </div>
-                          ) : (
-                            <div className="mb-2">
-                              <p className="text-gray-700 text-sm font-medium">
-                                {visit.descrizioneClinica ||
-                                  visit.anamnesi ||
-                                  "Visita generale"}
-                              </p>
+                              {visit.pediatria.peso && visit.pediatria.altezza &&
+                                <p className="text-gray-700 mt-1 text-sm font-medium">
+                                  Peso: {visit.pediatria.peso} kg • Altezza: {visit.pediatria.altezza} cm
+                                </p>
+                              }
                             </div>
                           )}
+                          <div className="mb-2">
+                            <p className="text-gray-700 text-sm font-medium">
+                              {visit.descrizioneClinica ||
+                                visit.anamnesi ||
+                                "Visita di controllo"}
+                            </p>
+                          </div>
 
                           {/* Estratto note/conclusioni (cosa è stato fatto/trovato) */}
-                          {(visit.conclusioniDiagnostiche ||
-                            visit.ginecologia?.conclusione ||
-                            visit.ostetricia?.noteOstetriche) && (
+                          {(visit.conclusioniDiagnostiche) && (
                             <div className="text-sm text-gray-600 bg-default-50 p-2 rounded-lg border-l-3 border-default-300">
-                              {visit.conclusioniDiagnostiche ||
-                                visit.ginecologia?.conclusione ||
-                                visit.ostetricia?.noteOstetriche}
+                              {visit.conclusioniDiagnostiche}
                             </div>
                           )}
                         </div>
@@ -1117,21 +892,17 @@ export default function PatientHistory() {
                         >
                           <EditIcon size={18} />
                         </Button>
-                        {(visit.tipo === "ginecologica" ||
-                          visit.tipo === "ginecologica_pediatrica" ||
-                          visit.tipo === "ostetrica") && (
-                          <Button
-                            isIconOnly
-                            size="sm"
-                            variant="light"
-                            color="secondary"
-                            onPress={() => handlePrintPdf(visit)}
-                            isLoading={pdfLoading}
-                            title="Stampa Referto"
-                          >
-                            <Printer size={18} />
-                          </Button>
-                        )}
+                        <Button
+                          isIconOnly
+                          size="sm"
+                          variant="light"
+                          color="secondary"
+                          onPress={() => handlePrintPdf(visit)}
+                          isLoading={pdfLoading}
+                          title="Stampa Referto"
+                        >
+                          <Printer size={18} />
+                        </Button>
                       </div>
                     </div>
                   </CardBody>
@@ -1265,163 +1036,37 @@ export default function PatientHistory() {
                   </div>
                   <Chip
                     color={
-                      selectedVisit.tipo === "ginecologica" ||
-                      selectedVisit.tipo === "ginecologica_pediatrica"
-                        ? "primary"
-                        : selectedVisit.tipo === "ostetrica"
-                          ? "secondary"
-                          : "default"
+                      selectedVisit.tipo === "bilancio_salute"
+                        ? "success"
+                        : selectedVisit.tipo === "patologia"
+                          ? "danger"
+                          : selectedVisit.tipo === "urgenza"
+                            ? "warning"
+                            : "primary"
                     }
                     variant="flat"
                   >
-                    {selectedVisit.tipo === "ginecologica_pediatrica"
-                      ? "Ginecologia Pediatrica"
-                      : selectedVisit.tipo === "ginecologica"
-                        ? "Ginecologia"
-                        : selectedVisit.tipo === "ostetrica"
-                          ? "Ostetricia"
-                          : "Generale"}
+                    {getVisitTypeLabel(selectedVisit.tipo)}
                   </Chip>
                 </div>
               </ModalHeader>
               <ModalBody>
-                {(selectedVisit.tipo === "ginecologica" ||
-                  selectedVisit.tipo === "ginecologica_pediatrica" ||
-                  selectedVisit.tipo === "ostetrica") &&
-                  (previewPdfLoading ? (
-                    <div className="flex justify-center items-center min-h-[60vh]">
-                      <Spinner size="lg" color="primary" label="Generazione anteprima PDF..." />
-                    </div>
-                  ) : previewPdfBlobUrl ? (
-                    <div className="bg-[#e5e5e5] rounded-lg p-2 flex flex-col min-h-[70vh]">
-                      <iframe
-                        src={previewPdfBlobUrl}
-                        title="Anteprima referto"
-                        className="flex-1 w-full min-h-[70vh] rounded border border-gray-300 bg-white"
-                      />
-                    </div>
-                  ) : (
-                    <div className="flex justify-center items-center min-h-[60vh] text-default-500">
-                      Anteprima non disponibile.
-                    </div>
-                  ))}
-                {(selectedVisit.tipo !== "ginecologica" &&
-                  selectedVisit.tipo !== "ginecologica_pediatrica" &&
-                  selectedVisit.tipo !== "ostetrica") && (
-                <div className="bg-[#e5e5e5] rounded-lg p-4">
-                  {/* Foglio A4-like per visite generali */}
-                  <div className="mx-auto w-full max-w-[210mm] bg-white border border-gray-300 shadow-sm text-[#141414] font-sans">
-                    {/* ─── Header come PDF ─── */}
-                    <div className="text-center pt-4 pb-2">
-                      <p className="text-base font-bold uppercase tracking-tight">
-                        {doctor
-                          ? `Dott. ${doctor.nome} ${doctor.cognome}`
-                          : "Studio Medico"}
-                      </p>
-                      {doctor?.specializzazione && (
-                        <p className="text-[11px] text-[#3c3c3c] uppercase mt-0.5">
-                          {doctor.specializzazione}
-                        </p>
-                      )}
-                      <div className="border-t border-gray-300 w-4/5 mx-auto my-2" />
-                      <p className="text-lg font-bold">REFERTO VISITA</p>
-                      <p className="text-[11px] text-[#3c3c3c] mt-0.5" />
-                    </div>
-
-                    {/* ─── Box paziente come PDF (DATI DEL PAZIENTE | DATA VISITA) ─── */}
-                    <div className="border border-gray-300 mx-4 mt-2">
-                      <div className="bg-[#f0f0f0] px-2 py-1.5 flex justify-between items-center text-[10px] font-bold text-[#3c3c3c]">
-                        <span>DATI DEL PAZIENTE</span>
-                        <span>
-                          DATA VISITA: {formatPdfDate(selectedVisit.dataVisita)}
-                        </span>
-                      </div>
-                      <div className="px-2 py-2">
-                        <p className="text-sm font-bold">
-                          {patient.nome} {patient.cognome}
-                        </p>
-                        <p className="text-[11px] text-[#3c3c3c] mt-0.5">
-                          Nato/a il: {formatPdfDate(patient.dataNascita)}
-                          {calculateAge(patient.dataNascita)
-                            ? ` (${calculateAge(patient.dataNascita)} anni)`
-                            : ""}
-                          {"   •   "}CF:{" "}
-                          <CodiceFiscaleValue
-                            value={patient.codiceFiscale}
-                            placeholder="-"
-                            generatedFromImport={Boolean(
-                              patient.codiceFiscaleGenerato,
-                            )}
-                          />
-                          {"   •   "}Sesso:{" "}
-                          {patient.sesso === "M"
-                            ? "M"
-                            : patient.sesso === "F"
-                              ? "F"
-                              : "-"}
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Visita generale: solo sezioni testuali */}
-                    <>
-                        {[
-                          {
-                            title: "ANAMNESI",
-                            content: getPreviewAnamnesi(selectedVisit),
-                          },
-                          {
-                            title: "Dati Clinici",
-                            content: getPreviewDatiClinici(selectedVisit),
-                          },
-                          {
-                            title: "ESAME OBIETTIVO",
-                            content: getPreviewEsameObiettivo(selectedVisit),
-                          },
-                          {
-                            title: "Conclusioni e Terapia",
-                            content: getPreviewConclusioni(selectedVisit),
-                          },
-                        ].map((sec, i) => (
-                          <div key={i} className="mx-4 mt-3">
-                            <div className="bg-[#f0f0f0] px-2 py-1 font-bold text-[10px] uppercase">
-                              {sec.title}
-                            </div>
-                            <div className="px-2 py-1.5 text-[11px] whitespace-pre-wrap border-x border-b border-gray-300">
-                              {sec.content?.trim() || "-"}
-                            </div>
-                          </div>
-                        ))}
-                    </>
-
-                    {/* Footer come PDF */}
-                    <div className="border-t border-gray-300 mt-6 mx-4 pt-3 pb-4">
-                      <p className="text-[10px] text-[#3c3c3c] text-center">
-                        {(() => {
-                          const parts: string[] = [];
-                          if (
-                            doctor?.ambulatori &&
-                            doctor.ambulatori.length > 0
-                          ) {
-                            const amb =
-                              doctor.ambulatori.find((a) => a.isPrimario) ||
-                              doctor.ambulatori[0];
-                            parts.push(
-                              amb.nome,
-                              `${amb.indirizzo}, ${amb.citta}`,
-                            );
-                          }
-                          if (doctor?.telefono)
-                            parts.push(`Tel: ${doctor.telefono}`);
-                          if (doctor?.email) parts.push(doctor.email);
-                          if (showDoctorPhoneInPdf && doctor?.telefono) parts.push(`Tel: ${doctor.telefono}`);
-                          if (showDoctorEmailInPdf && doctor?.email) parts.push(doctor.email);
-                          return parts.length ? parts.join("  •  ") : "—";
-                        })()}
-                      </p>
-                    </div>
+                {previewPdfLoading ? (
+                  <div className="flex justify-center items-center min-h-[60vh]">
+                    <Spinner size="lg" color="primary" label="Generazione anteprima PDF..." />
                   </div>
-                </div>
+                ) : previewPdfBlobUrl ? (
+                  <div className="bg-[#e5e5e5] rounded-lg p-2 flex flex-col min-h-[70vh]">
+                    <iframe
+                      src={previewPdfBlobUrl}
+                      title="Anteprima referto pediatric"
+                      className="flex-1 w-full min-h-[70vh] rounded border border-gray-300 bg-white"
+                    />
+                  </div>
+                ) : (
+                  <div className="flex justify-center items-center min-h-[60vh] text-default-500">
+                    Anteprima PDF in elaborazione o non disponibile.
+                  </div>
                 )}
               </ModalBody>
               <ModalFooter className="flex-wrap gap-2">
@@ -1948,7 +1593,7 @@ export default function PatientHistory() {
         size="md"
       >
         <ModalContent>
-          <ModalHeader>Includere immagini ecografia?</ModalHeader>
+          <ModalHeader>Includere immagini?</ModalHeader>
           <ModalBody>
             <p className="text-sm text-gray-600">
               Sono presenti{" "}

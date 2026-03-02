@@ -41,7 +41,7 @@ export default function HelpAndFeedback() {
       setSubmitStatus('success');
       setIsSubmitting(false);
       setFeedbackData({ name: "", email: "", message: "" });
-      
+
       // Reset status after 3 seconds
       setTimeout(() => setSubmitStatus('idle'), 3000);
     }, 1500);
@@ -74,11 +74,11 @@ export default function HelpAndFeedback() {
       items: [
         {
           title: "Come creo una nuova visita?",
-          content: "Dalla scheda del paziente, clicca su '+ Nuova Visita'. Puoi scegliere tra visita Ginecologica, Ginecologica Pediatrica (se abilitata in Impostazioni) e Ostetrica usando le schede in alto. I campi cambieranno in base al tipo selezionato."
+          content: "Dalla scheda del paziente, clicca su '+ Nuova Visita'. Puoi scegliere tra visita 'Bilancio di Salute', 'Patologia', 'Controllo' o 'Urgenza' usando le schede in alto. I campi e i modelli disponibili cambieranno in base al tipo selezionato."
         },
         {
-          title: "Come funziona il calcolo automatico della gravidanza?",
-          content: "Nella visita Ostetrica, inserendo la 'Data Ultima Mestruazione' (LMP), il sistema calcola automaticamente la Data Presunta del Parto (DPP) e le Settimane di Gestazione attuali (es. 15+3). Puoi comunque modificare manualmente questi valori."
+          title: "Come funziona il calcolo dei percentili?",
+          content: "Nella visita (es. Bilancio di Salute) nella sezione Auxologica, puoi inserire i campi Peso, Altezza e Circonferenza Cranica, seguiti dai relativi percentili o punteggi Z. Questi dati vengono poi riportati automaticamente sia nello storico che nel referto PDF PDF."
         },
         {
           title: "Come uso i modelli (template) nei referti?",
@@ -95,7 +95,7 @@ export default function HelpAndFeedback() {
       items: [
         {
           title: "Come prescrivo esami complementari?",
-          content: "Dalla scheda paziente, nella colonna di destra 'Esami', clicca su 'Nuovo Esame'. Puoi scegliere un esame dalla lista dei modelli (es. Colposcopia, Pap Test) o scriverne uno nuovo. Anche qui puoi generare un PDF di richiesta/prescrizione."
+          content: "Dalla scheda paziente, nella colonna di destra 'Esami', clicca su 'Nuovo Esame'. Puoi scegliere un esame dalla lista dei modelli (es. Tampone faringeo, Esame urine) o scriverne uno nuovo. Anche qui puoi generare un PDF di richiesta/prescrizione."
         },
         {
           title: "Posso allegare file esterni?",
@@ -236,7 +236,7 @@ export default function HelpAndFeedback() {
                     labelPlacement="outside"
                     isRequired
                   />
-                  
+
                   <Textarea
                     name="message"
                     label="Messaggio"

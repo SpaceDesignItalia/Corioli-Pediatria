@@ -6,7 +6,6 @@ import {
   Button,
   Select,
   SelectItem,
-  Switch,
   Avatar,
   Divider,
   Input,
@@ -33,9 +32,7 @@ import {
   Users,
   Search,
   Download,
-  Upload,
   RefreshCw,
-  Database,
   Settings as SettingsIcon,
   FileText,
   Plus,
@@ -51,7 +48,6 @@ import {
   PatientService,
   VisitService,
   DocumentService,
-  BackupService,
   PreferenceService,
 } from "../../services/OfflineServices";
 import { MedicalTemplate } from "../../types/Storage";
@@ -77,7 +73,7 @@ const SettingsScreen = () => {
   // Template State
   const [templates, setTemplates] = useState<MedicalTemplate[]>([]);
   const [selectedCategory, setSelectedCategory] =
-    useState<string>("ginecologia");
+    useState<string>("bilancio_salute");
   const {
     isOpen: isTemplateModalOpen,
     onOpen: onTemplateModalOpen,
@@ -88,17 +84,15 @@ const SettingsScreen = () => {
   >({
     label: "",
     text: "",
-    category: "ginecologia",
-    section: "prestazione",
+    category: "bilancio_salute",
+    section: "anamnesi",
   });
 
   // Data stats
   const [patientCount, setPatientCount] = useState(0);
   const [visitCount, setVisitCount] = useState(0);
   const [docCount, setDocCount] = useState(0);
-  const [dataSize, setDataSize] = useState(0);
   const [lastBackupDate, setLastBackupDate] = useState<string | null>(null);
-  const [isExporting, setIsExporting] = useState(false);
 
   const [ambulatori, setAmbulatori] = useState<any[]>([]);
   const [savingAmbulatori, setSavingAmbulatori] = useState(false);
@@ -161,10 +155,6 @@ const SettingsScreen = () => {
   const [updateAvailable, setUpdateAvailable] = useState<string | null>(null);
   const [updateDownloaded, setUpdateDownloaded] = useState(false);
   const [updateError, setUpdateError] = useState<string | null>(null);
-
-  const handleNotificationsToggle = () => {
-    setNotificationsEnabled(!notificationsEnabled);
-  };
 
   const [cropImageOpen, setCropImageOpen] = useState(false);
   const [cropImageDataUrl, setCropImageDataUrl] = useState("");
@@ -260,9 +250,6 @@ const SettingsScreen = () => {
         setPatientCount(patients.length);
         setVisitCount(visits.length);
         setDocCount(docs.length);
-        // Calcolo dimensione approssimativa
-        const dataStr = JSON.stringify({ patients, visits, docs });
-        setDataSize(dataStr.length);
       } catch {
         // ignore
       }
@@ -340,16 +327,18 @@ const SettingsScreen = () => {
 
   const handleNewTemplate = () => {
     const sectionByCategory: Record<string, string> = {
-      ginecologia: "prestazione",
-      ostetricia: "prestazione",
+      bilancio_salute: "anamnesi",
+      patologia: "anamnesi",
+      controllo: "anamnesi",
+      urgenza: "anamnesi",
       terapie: "generale",
       esame_complementare: "nome",
     };
     setCurrentTemplate({
       label: "",
       text: "",
-      category: selectedCategory,
-      section: (sectionByCategory[selectedCategory] ?? "prestazione") as any,
+      category: selectedCategory as any,
+      section: (sectionByCategory[selectedCategory] ?? "anamnesi") as any,
     });
     onTemplateModalOpen();
   };
@@ -442,9 +431,6 @@ const SettingsScreen = () => {
     setDoctorInfo((prev) => ({ ...prev, [field]: value }));
   };
 
-  const handlePreferenceChange = (field: string, value: boolean | string) => {
-    setPreferences(prev => ({ ...prev, [field]: value }));
-  };
 
   const normalizeName = (value: string) =>
     (value || "")
@@ -869,7 +855,7 @@ const SettingsScreen = () => {
           field.key === "codiceFiscale" &&
           mergedValue &&
           Boolean(target.codiceFiscaleGenerato) !==
-            Boolean(generatedByValue[mergedValue])
+          Boolean(generatedByValue[mergedValue])
         ) {
           basePayload.codiceFiscaleGenerato = Boolean(
             generatedByValue[mergedValue],
@@ -881,11 +867,11 @@ const SettingsScreen = () => {
       const defaultValue =
         field.key === "codiceFiscale"
           ? choosePreferredCodiceFiscale(
-              rawValues,
-              target.codiceFiscale,
-              generatedByValue,
-              Boolean(target.codiceFiscaleGenerato),
-            )
+            rawValues,
+            target.codiceFiscale,
+            generatedByValue,
+            Boolean(target.codiceFiscaleGenerato),
+          )
           : String(target[field.key] || "").trim() || rawValues[0];
 
       conflictFields.push({
@@ -1167,7 +1153,7 @@ const SettingsScreen = () => {
       setSuccess("Profilo salvato con successo.");
 
       setTimeout(() => setSuccess(null), 3000);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Errore nel salvataggio:", error);
       setError("Errore nel salvataggio dei dati: " + error.message);
       setTimeout(() => setError(null), 5000);
@@ -1176,34 +1162,7 @@ const SettingsScreen = () => {
     }
   };
 
-  const formatBytes = (bytes: number, decimals = 2) => {
-    if (!+bytes) return "0 Bytes";
-    const k = 1024;
-    const dm = decimals < 0 ? 0 : decimals;
-    const sizes = ["Bytes", "KB", "MB", "GB", "TB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
-  };
 
-  const handleQuickBackup = async () => {
-    setIsExporting(true);
-    try {
-      await BackupService.downloadBackup();
-      const now = new Date().toISOString();
-      setLastBackupDate(now);
-
-      const newPrefs = { ...preferences, lastBackupDate: now };
-      setPreferences(newPrefs);
-      await PreferenceService.savePreferences(newPrefs);
-
-      setSuccess("Backup scaricato con successo.");
-      setTimeout(() => setSuccess(null), 3000);
-    } catch (e) {
-      setError("Errore durante il download del backup.");
-    } finally {
-      setIsExporting(false);
-    }
-  };
 
   return (
     <div className="max-w-6xl mx-auto space-y-8">
@@ -1291,281 +1250,280 @@ const SettingsScreen = () => {
         </Card>
       )}
 
-      <div className="space-y-8">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Profilo Dottore */}
-          <Card className="shadow-lg h-full">
-            <CardHeader className="pb-2">
-              <div className="flex items-center gap-3">
-                <User className="w-5 h-5 text-primary" />
-                <h2 className="text-xl font-semibold text-gray-900">
-                  Profilo Dottore
-                </h2>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* Profilo Dottore */}
+        <Card className="shadow-lg h-full">
+          <CardHeader className="pb-2">
+            <div className="flex items-center gap-3">
+              <User className="w-5 h-5 text-primary" />
+              <h2 className="text-xl font-semibold text-gray-900">
+                Profilo Dottore
+              </h2>
+            </div>
+          </CardHeader>
+          <CardBody className="space-y-6">
+            <div className="flex items-center gap-4">
+              <Avatar
+                key={profilePic} // Force re-render on change
+                src={profilePic || undefined}
+                name={`${doctorInfo.nome} ${doctorInfo.cognome}`}
+                size="lg"
+                className="w-20 h-20"
+                showFallback={!profilePic}
+              />
+              <div className="flex-1">
+                <Button
+                  variant="flat"
+                  color="primary"
+                  size="sm"
+                  as="label"
+                  className="cursor-pointer"
+                >
+                  Cambia Foto
+                  <input
+                    type="file"
+                    accept="image/*"
+                    hidden
+                    onChange={handleProfilePicChange}
+                  />
+                </Button>
+                <p className="text-xs text-default-500 mt-1">
+                  Seleziona un&apos;immagine: si aprirà l&apos;anteprima per
+                  scegliere la porzione circolare.
+                </p>
               </div>
-            </CardHeader>
-            <CardBody className="space-y-6">
-              <div className="flex items-center gap-4">
-                <Avatar
-                  key={profilePic} // Force re-render on change
-                  src={profilePic || undefined}
-                  name={`${doctorInfo.nome} ${doctorInfo.cognome}`}
-                  size="lg"
-                  className="w-20 h-20"
-                  showFallback={!profilePic}
-                />
-                <div className="flex-1">
-                  <Button
-                    variant="flat"
-                    color="primary"
-                    size="sm"
-                    as="label"
-                    className="cursor-pointer"
-                  >
-                    Cambia Foto
-                    <input
-                      type="file"
-                      accept="image/*"
-                      hidden
-                      onChange={handleProfilePicChange}
-                    />
-                  </Button>
-                  <p className="text-xs text-default-500 mt-1">
-                    Seleziona un&apos;immagine: si aprirà l&apos;anteprima per
-                    scegliere la porzione circolare.
-                  </p>
-                </div>
-              </div>
+            </div>
 
-              <div className="grid grid-cols-1 gap-4">
-                <Input
-                  label="Nome"
-                  value={doctorInfo.nome}
-                  isRequired
-                  onValueChange={(value) =>
-                    handleDoctorInfoChange("nome", value)
-                  }
-                  variant="bordered"
-                />
-                <Input
-                  label="Cognome"
-                  value={doctorInfo.cognome}
-                  isRequired
-                  onValueChange={(value) =>
-                    handleDoctorInfoChange("cognome", value)
-                  }
-                  variant="bordered"
-                />
-                <Input
-                  label="Email"
-                  type="email"
-                  value={doctorInfo.email}
-                  isRequired
-                  onValueChange={(value) =>
-                    handleDoctorInfoChange("email", value)
-                  }
-                  variant="bordered"
-                />
-                <Input
-                  label="Telefono"
-                  value={doctorInfo.telefono}
-                  isRequired
-                  onValueChange={(value) =>
-                    handleDoctorInfoChange("telefono", value)
-                  }
-                  variant="bordered"
-                  placeholder="3331234567"
-                  description="Numero di telefono professionale"
-                />
-                <Input
-                  label="Specializzazione"
-                  value={doctorInfo.specializzazione}
-                  isRequired
-                  onValueChange={(value) =>
-                    handleDoctorInfoChange("specializzazione", value)
-                  }
-                  variant="bordered"
-                  placeholder="Es. Ginecologia e Ostetricia"
-                />
-              </div>
+            <div className="grid grid-cols-1 gap-4">
+              <Input
+                label="Nome"
+                value={doctorInfo.nome}
+                isRequired
+                onValueChange={(value) =>
+                  handleDoctorInfoChange("nome", value)
+                }
+                variant="bordered"
+              />
+              <Input
+                label="Cognome"
+                value={doctorInfo.cognome}
+                isRequired
+                onValueChange={(value) =>
+                  handleDoctorInfoChange("cognome", value)
+                }
+                variant="bordered"
+              />
+              <Input
+                label="Email"
+                type="email"
+                value={doctorInfo.email}
+                isRequired
+                onValueChange={(value) =>
+                  handleDoctorInfoChange("email", value)
+                }
+                variant="bordered"
+              />
+              <Input
+                label="Telefono"
+                value={doctorInfo.telefono}
+                isRequired
+                onValueChange={(value) =>
+                  handleDoctorInfoChange("telefono", value)
+                }
+                variant="bordered"
+                placeholder="3331234567"
+                description="Numero di telefono professionale"
+              />
+              <Input
+                label="Specializzazione"
+                value={doctorInfo.specializzazione}
+                isRequired
+                onValueChange={(value) =>
+                  handleDoctorInfoChange("specializzazione", value)
+                }
+                variant="bordered"
+                placeholder="Es. Ginecologia e Ostetricia"
+              />
+            </div>
 
-              <Button
-                color="primary"
-                className="w-full"
-                onPress={saveDoctorInfo}
-                isLoading={isLoading}
-              >
-                {isLoading ? "Salvando..." : "Salva Modifiche"}
-              </Button>
-            </CardBody>
-          </Card>
+            <Button
+              color="primary"
+              className="w-full"
+              onPress={saveDoctorInfo}
+              isLoading={isLoading}
+            >
+              {isLoading ? "Salvando..." : "Salva Modifiche"}
+            </Button>
+          </CardBody>
+        </Card>
 
-          {/* Ambulatori */}
-          <Card className="shadow-lg h-full flex flex-col">
-            <CardHeader className="pb-2 flex-shrink-0">
-              <div className="flex items-center gap-3">
-                <div className="w-5 h-5 bg-emerald-500 rounded"></div>
-                <h2 className="text-xl font-semibold text-gray-900">
-                  Ambulatori
-                </h2>
-              </div>
-            </CardHeader>
-            <CardBody className="flex flex-col flex-1 min-h-0 gap-0">
-              {/* Lista ambulatori esistenti */}
-              <div className="overflow-y-auto overflow-x-hidden space-y-3 pr-2 flex-1 min-h-[10rem] rounded-lg border border-default-200 bg-default-50/50 p-2">
-                {ambulatori.length > 0 ? (
-                  <>
-                    <h3 className="font-medium text-gray-900">
-                      Ambulatori Configurati
-                    </h3>
-                    {ambulatori.map((amb) => (
-                      <Card key={amb.id} className="bg-gray-50">
-                        <CardBody className="p-4">
-                          <div className="flex items-start justify-between">
-                            <div className="flex-1">
-                              <div className="flex items-center gap-2 mb-2">
-                                <h4 className="font-semibold text-gray-900">
-                                  {amb.nome}
-                                </h4>
-                                {amb.isPrimario && (
-                                  <Chip
-                                    size="sm"
-                                    color="success"
-                                    variant="flat"
-                                  >
-                                    In uso
-                                  </Chip>
-                                )}
-                              </div>
-                              <p className="text-sm text-gray-600">
-                                {amb.indirizzo}, {amb.cap} {amb.citta}
-                              </p>
-                              <p className="text-sm text-gray-600">
-                                Tel: {amb.telefono}{" "}
-                                {amb.email && `• Email: ${amb.email}`}
-                              </p>
-                            </div>
-                            <div className="flex gap-2">
-                              {!amb.isPrimario && (
-                                <Button
+        {/* Ambulatori */}
+        <Card className="shadow-lg h-full flex flex-col">
+          <CardHeader className="pb-2 flex-shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="w-5 h-5 bg-emerald-500 rounded"></div>
+              <h2 className="text-xl font-semibold text-gray-900">
+                Ambulatori
+              </h2>
+            </div>
+          </CardHeader>
+          <CardBody className="flex flex-col flex-1 min-h-0 gap-0">
+            {/* Lista ambulatori esistenti */}
+            <div className="overflow-y-auto overflow-x-hidden space-y-3 pr-2 flex-1 min-h-[10rem] rounded-lg border border-default-200 bg-default-50/50 p-2">
+              {ambulatori.length > 0 ? (
+                <>
+                  <h3 className="font-medium text-gray-900">
+                    Ambulatori Configurati
+                  </h3>
+                  {ambulatori.map((amb) => (
+                    <Card key={amb.id} className="bg-gray-50">
+                      <CardBody className="p-4">
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-2">
+                              <h4 className="font-semibold text-gray-900">
+                                {amb.nome}
+                              </h4>
+                              {amb.isPrimario && (
+                                <Chip
                                   size="sm"
-                                  color="primary"
+                                  color="success"
                                   variant="flat"
-                                  onPress={() => setPrimario(amb.id)}
-                                  isLoading={savingAmbulatori}
-                                  isDisabled={savingAmbulatori}
                                 >
-                                  Imposta come attuale
-                                </Button>
+                                  In uso
+                                </Chip>
                               )}
+                            </div>
+                            <p className="text-sm text-gray-600">
+                              {amb.indirizzo}, {amb.cap} {amb.citta}
+                            </p>
+                            <p className="text-sm text-gray-600">
+                              Tel: {amb.telefono}{" "}
+                              {amb.email && `• Email: ${amb.email}`}
+                            </p>
+                          </div>
+                          <div className="flex gap-2">
+                            {!amb.isPrimario && (
                               <Button
                                 size="sm"
-                                color="danger"
+                                color="primary"
                                 variant="flat"
-                                onPress={() => removeAmbulatorio(amb.id)}
+                                onPress={() => setPrimario(amb.id)}
                                 isLoading={savingAmbulatori}
                                 isDisabled={savingAmbulatori}
                               >
-                                Rimuovi
+                                Imposta come attuale
                               </Button>
-                            </div>
+                            )}
+                            <Button
+                              size="sm"
+                              color="danger"
+                              variant="flat"
+                              onPress={() => removeAmbulatorio(amb.id)}
+                              isLoading={savingAmbulatori}
+                              isDisabled={savingAmbulatori}
+                            >
+                              Rimuovi
+                            </Button>
                           </div>
-                        </CardBody>
-                      </Card>
-                    ))}
-                  </>
-                ) : (
-                  <p className="text-sm text-gray-500">
-                    Nessun ambulatorio configurato. Aggiungine uno qui sotto.
-                  </p>
-                )}
-              </div>
+                        </div>
+                      </CardBody>
+                    </Card>
+                  ))}
+                </>
+              ) : (
+                <p className="text-sm text-gray-500">
+                  Nessun ambulatorio configurato. Aggiungine uno qui sotto.
+                </p>
+              )}
+            </div>
 
-              <Divider className="flex-shrink-0 my-4" />
+            <Divider className="flex-shrink-0 my-4" />
 
-              {/* Form nuovo ambulatorio - sempre visibile, non scrolla */}
-              <div className="space-y-4 flex-shrink-0">
-                <h3 className="font-medium text-gray-900">
-                  Aggiungi Nuovo Ambulatorio
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <Input
-                    label="Nome Ambulatorio"
-                    value={newAmbulatorio.nome}
-                    onValueChange={(value) =>
-                      setNewAmbulatorio((prev) => ({ ...prev, nome: value }))
-                    }
-                    variant="bordered"
-                    placeholder="Studio Medico Dott. Rossi"
-                  />
-                  <Input
-                    label="Telefono Ambulatorio"
-                    value={newAmbulatorio.telefono}
-                    onValueChange={(value) =>
-                      setNewAmbulatorio((prev) => ({
-                        ...prev,
-                        telefono: value,
-                      }))
-                    }
-                    variant="bordered"
-                    placeholder="0612345678"
-                  />
-                </div>
+            {/* Form nuovo ambulatorio - sempre visibile, non scrolla */}
+            <div className="space-y-4 flex-shrink-0">
+              <h3 className="font-medium text-gray-900">
+                Aggiungi Nuovo Ambulatorio
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <Input
-                  label="Indirizzo"
-                  value={newAmbulatorio.indirizzo}
+                  label="Nome Ambulatorio"
+                  value={newAmbulatorio.nome}
                   onValueChange={(value) =>
-                    setNewAmbulatorio((prev) => ({ ...prev, indirizzo: value }))
+                    setNewAmbulatorio((prev) => ({ ...prev, nome: value }))
                   }
                   variant="bordered"
-                  placeholder="Via Roma 10"
+                  placeholder="Studio Medico Dott. Rossi"
                 />
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <Input
-                    label="Città"
-                    value={newAmbulatorio.citta}
-                    onValueChange={(value) =>
-                      setNewAmbulatorio((prev) => ({ ...prev, citta: value }))
-                    }
-                    variant="bordered"
-                    placeholder="Roma"
-                  />
-                  <Input
-                    label="CAP"
-                    value={newAmbulatorio.cap}
-                    onValueChange={(value) =>
-                      setNewAmbulatorio((prev) => ({ ...prev, cap: value }))
-                    }
-                    variant="bordered"
-                    placeholder="00100"
-                  />
-                  <Input
-                    label="Email (Opzionale)"
-                    type="email"
-                    value={newAmbulatorio.email}
-                    onValueChange={(value) =>
-                      setNewAmbulatorio((prev) => ({ ...prev, email: value }))
-                    }
-                    variant="bordered"
-                    placeholder="studio@email.com"
-                  />
-                </div>
-                <Button
-                  color="success"
-                  variant="flat"
-                  onPress={addAmbulatorio}
-                  isLoading={savingAmbulatori}
-                  isDisabled={savingAmbulatori}
-                  className="w-full"
-                >
-                  {savingAmbulatori ? "Salvataggio..." : "Aggiungi Ambulatorio"}
-                </Button>
+                <Input
+                  label="Telefono Ambulatorio"
+                  value={newAmbulatorio.telefono}
+                  onValueChange={(value) =>
+                    setNewAmbulatorio((prev) => ({
+                      ...prev,
+                      telefono: value,
+                    }))
+                  }
+                  variant="bordered"
+                  placeholder="0612345678"
+                />
               </div>
-            </CardBody>
-          </Card>
-        </div>
+              <Input
+                label="Indirizzo"
+                value={newAmbulatorio.indirizzo}
+                onValueChange={(value) =>
+                  setNewAmbulatorio((prev) => ({ ...prev, indirizzo: value }))
+                }
+                variant="bordered"
+                placeholder="Via Roma 10"
+              />
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <Input
+                  label="Città"
+                  value={newAmbulatorio.citta}
+                  onValueChange={(value) =>
+                    setNewAmbulatorio((prev) => ({ ...prev, citta: value }))
+                  }
+                  variant="bordered"
+                  placeholder="Roma"
+                />
+                <Input
+                  label="CAP"
+                  value={newAmbulatorio.cap}
+                  onValueChange={(value) =>
+                    setNewAmbulatorio((prev) => ({ ...prev, cap: value }))
+                  }
+                  variant="bordered"
+                  placeholder="00100"
+                />
+                <Input
+                  label="Email (Opzionale)"
+                  type="email"
+                  value={newAmbulatorio.email}
+                  onValueChange={(value) =>
+                    setNewAmbulatorio((prev) => ({ ...prev, email: value }))
+                  }
+                  variant="bordered"
+                  placeholder="studio@email.com"
+                />
+              </div>
+              <Button
+                color="success"
+                variant="flat"
+                onPress={addAmbulatorio}
+                isLoading={savingAmbulatori}
+                isDisabled={savingAmbulatori}
+                className="w-full"
+              >
+                {savingAmbulatori ? "Salvataggio..." : "Aggiungi Ambulatorio"}
+              </Button>
+            </div>
+          </CardBody>
+        </Card>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Backup e Dati */}
+
+        {/* Backup e Dati */}
+        <div className="w-full">
           <Card className="shadow-lg h-full">
             <CardHeader className="pb-2">
               <div className="flex items-center gap-3">
@@ -1615,11 +1573,11 @@ const SettingsScreen = () => {
                     >
                       {lastBackupDate
                         ? new Date(lastBackupDate).toLocaleDateString() +
-                          " " +
-                          new Date(lastBackupDate).toLocaleTimeString([], {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })
+                        " " +
+                        new Date(lastBackupDate).toLocaleTimeString([], {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })
                         : "Mai eseguito"}
                     </span>
                   </div>
@@ -1630,115 +1588,10 @@ const SettingsScreen = () => {
                 <div className="w-full [&>button]:w-full">
                   <BackupManager />
                 </div>
-                
+
                 <p className="text-xs text-center text-default-400 px-4">
                   Gestione avanzata permette importazioni, cancellazioni e reset.
                 </p>
-              </div>
-            </CardBody>
-          </Card>
-
-          {/* Funzionalita Visite */}
-          <Card className="shadow-lg h-full">
-            <CardHeader className="pb-1">
-              <div className="flex items-center gap-3">
-                <SettingsIcon className="w-5 h-5 text-secondary" />
-                <div>
-                  <h2 className="text-xl font-semibold text-gray-900">
-                    Funzionalita Visite
-                  </h2>
-                  <p className="text-xs text-default-500">
-                    Configura comportamento visite e contenuto PDF
-                  </p>
-                </div>
-              </div>
-            </CardHeader>
-            <CardBody className="space-y-4">
-              <div className="rounded-lg border border-default-200 bg-default-50/60 p-4">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <p className="text-sm font-medium text-gray-800">
-                      Visita ginecologica pediatrica
-                    </p>
-                    <p className="text-xs text-default-500 mt-1">
-                      Mostra il tab dedicato nella pagina Nuova Visita.
-                    </p>
-                  </div>
-                  <Switch
-                    aria-label="Abilita visita ginecologica pediatrica"
-                    isSelected={preferences.visitaGinecologicaPediatricaEnabled}
-                    onValueChange={(value) =>
-                      handlePreferenceChange(
-                        "visitaGinecologicaPediatricaEnabled",
-                        value,
-                      )
-                    }
-                  />
-                </div>
-              </div>
-
-              <div className="rounded-lg border border-default-200 p-4">
-                <p className="text-sm font-medium text-gray-800 mb-2">
-                  Formula stima peso fetale
-                </p>
-                <Select
-                  label="Formula"
-                  selectedKeys={[preferences.formulaPesoFetale || "hadlock4"]}
-                  onSelectionChange={(keys) =>
-                    handlePreferenceChange(
-                      "formulaPesoFetale",
-                      Array.from(keys)[0] as string,
-                    )
-                  }
-                  variant="bordered"
-                  description="Usata nel calcolo della biometria fetale."
-                >
-                  <SelectItem key="hadlock4" value="hadlock4">
-                    Hadlock IV (BPD, HC, AC, FL)
-                  </SelectItem>
-                  <SelectItem key="hadlock1" value="hadlock1">
-                    Hadlock I (BPD, AC, FL)
-                  </SelectItem>
-                  <SelectItem key="hadlock2" value="hadlock2">
-                    Hadlock II (HC, AC, FL)
-                  </SelectItem>
-                  <SelectItem key="hadlock3" value="hadlock3">
-                    Hadlock III (AC, FL)
-                  </SelectItem>
-                  <SelectItem key="shepard" value="shepard">
-                    Shepard (BPD, AC)
-                  </SelectItem>
-                  <SelectItem key="campbell" value="campbell">
-                    Campbell (AC)
-                  </SelectItem>
-                </Select>
-              </div>
-
-              <div className="rounded-lg border border-default-200 p-4 space-y-3">
-                <p className="text-sm font-medium text-gray-800">
-                  Dati dottore nel PDF
-                </p>
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-sm text-default-700">Mostra telefono</p>
-                  <Switch
-                    aria-label="Mostra telefono nel PDF"
-                    isSelected={Boolean(preferences.showDoctorPhoneInPdf)}
-                    onValueChange={(value) =>
-                      handlePreferenceChange("showDoctorPhoneInPdf", value)
-                    }
-                  />
-                </div>
-                <Divider />
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-sm text-default-700">Mostra email</p>
-                  <Switch
-                    aria-label="Mostra email nel PDF"
-                    isSelected={Boolean(preferences.showDoctorEmailInPdf)}
-                    onValueChange={(value) =>
-                      handlePreferenceChange("showDoctorEmailInPdf", value)
-                    }
-                  />
-                </div>
               </div>
             </CardBody>
           </Card>
@@ -1969,8 +1822,10 @@ const SettingsScreen = () => {
             selectedKey={selectedCategory}
             onSelectionChange={(key) => setSelectedCategory(key as string)}
           >
-            <Tab key="ginecologia" title="Ginecologia" />
-            <Tab key="ostetricia" title="Ostetricia" />
+            <Tab key="bilancio_salute" title="Bilancio Salute" />
+            <Tab key="patologia" title="Patologia" />
+            <Tab key="controllo" title="Controllo" />
+            <Tab key="urgenza" title="Urgenza" />
             <Tab key="terapie" title="Terapie" />
             <Tab key="esame_complementare" title="Esami" />
           </Tabs>
@@ -2223,11 +2078,17 @@ const SettingsScreen = () => {
                       }))
                     }
                   >
-                    <SelectItem key="ginecologia" value="ginecologia">
-                      Ginecologia
+                    <SelectItem key="bilancio_salute" value="bilancio_salute">
+                      Bilancio Salute
                     </SelectItem>
-                    <SelectItem key="ostetricia" value="ostetricia">
-                      Ostetricia
+                    <SelectItem key="patologia" value="patologia">
+                      Patologia
+                    </SelectItem>
+                    <SelectItem key="controllo" value="controllo">
+                      Controllo
+                    </SelectItem>
+                    <SelectItem key="urgenza" value="urgenza">
+                      Urgenza
                     </SelectItem>
                     <SelectItem key="terapie" value="terapie">
                       Terapie
@@ -2263,7 +2124,7 @@ const SettingsScreen = () => {
                     }))
                   }
                 >
-                  <SelectItem key="prestazione" value="prestazione">
+                  <SelectItem key="anamnesi" value="anamnesi">
                     Anamnesi / Prestazione
                   </SelectItem>
                   <SelectItem key="esameObiettivo" value="esameObiettivo">
@@ -2341,6 +2202,6 @@ const SettingsScreen = () => {
       </Modal>
     </div>
   );
-};
+}
 
 export default SettingsScreen;

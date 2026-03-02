@@ -376,19 +376,32 @@ class LocalStorageFallbackService implements StorageService {
     const templates = await this.getFromStorage<MedicalTemplate>('templates');
     const generateId = () => this.generateId();
 
-    if (templates.length === 0) {
-      // Initialize with defaults if empty
+    const hasObsoleteTemplates = templates.some(t => (t.category as string) === 'ginecologia' || (t.category as string) === 'ostetricia');
+    const hasPediatricTemplates = templates.some(t => t.category === 'bilancio_salute');
+
+    if (templates.length === 0 || hasObsoleteTemplates || !hasPediatricTemplates) {
+      // Initialize with defaults if empty or migrating
       const defaultTemplates: MedicalTemplate[] = [];
 
-      // Ginecologia
-      MedicalTemplates.ginecologia.prestazione.forEach(t => defaultTemplates.push({ id: generateId(), category: 'ginecologia', section: 'prestazione', label: t.label, text: t.text, isDefault: true }));
-      MedicalTemplates.ginecologia.esameObiettivo.forEach(t => defaultTemplates.push({ id: generateId(), category: 'ginecologia', section: 'esameObiettivo', label: t.label, text: t.text, isDefault: true }));
-      MedicalTemplates.ginecologia.conclusioni.forEach(t => defaultTemplates.push({ id: generateId(), category: 'ginecologia', section: 'conclusioni', label: t.label, text: t.text, isDefault: true }));
+      // Bilancio di Salute
+      MedicalTemplates.bilancio_salute.anamnesi.forEach(t => defaultTemplates.push({ id: generateId(), category: 'bilancio_salute', section: 'anamnesi', label: t.label, text: t.text, isDefault: true }));
+      MedicalTemplates.bilancio_salute.esameObiettivo.forEach(t => defaultTemplates.push({ id: generateId(), category: 'bilancio_salute', section: 'esameObiettivo', label: t.label, text: t.text, isDefault: true }));
+      MedicalTemplates.bilancio_salute.conclusioni.forEach(t => defaultTemplates.push({ id: generateId(), category: 'bilancio_salute', section: 'conclusioni', label: t.label, text: t.text, isDefault: true }));
 
-      // Ostetricia
-      MedicalTemplates.ostetricia.prestazione.forEach(t => defaultTemplates.push({ id: generateId(), category: 'ostetricia', section: 'prestazione', label: t.label, text: t.text, isDefault: true }));
-      MedicalTemplates.ostetricia.esameObiettivo.forEach(t => defaultTemplates.push({ id: generateId(), category: 'ostetricia', section: 'esameObiettivo', label: t.label, text: t.text, isDefault: true }));
-      MedicalTemplates.ostetricia.conclusioni.forEach(t => defaultTemplates.push({ id: generateId(), category: 'ostetricia', section: 'conclusioni', label: t.label, text: t.text, isDefault: true }));
+      // Patologia
+      MedicalTemplates.patologia.anamnesi.forEach(t => defaultTemplates.push({ id: generateId(), category: 'patologia', section: 'anamnesi', label: t.label, text: t.text, isDefault: true }));
+      MedicalTemplates.patologia.esameObiettivo.forEach(t => defaultTemplates.push({ id: generateId(), category: 'patologia', section: 'esameObiettivo', label: t.label, text: t.text, isDefault: true }));
+      MedicalTemplates.patologia.conclusioni.forEach(t => defaultTemplates.push({ id: generateId(), category: 'patologia', section: 'conclusioni', label: t.label, text: t.text, isDefault: true }));
+
+      // Controllo
+      MedicalTemplates.controllo.anamnesi.forEach(t => defaultTemplates.push({ id: generateId(), category: 'controllo', section: 'anamnesi', label: t.label, text: t.text, isDefault: true }));
+      MedicalTemplates.controllo.esameObiettivo.forEach(t => defaultTemplates.push({ id: generateId(), category: 'controllo', section: 'esameObiettivo', label: t.label, text: t.text, isDefault: true }));
+      MedicalTemplates.controllo.conclusioni.forEach(t => defaultTemplates.push({ id: generateId(), category: 'controllo', section: 'conclusioni', label: t.label, text: t.text, isDefault: true }));
+
+      // Urgenza
+      MedicalTemplates.urgenza.anamnesi.forEach(t => defaultTemplates.push({ id: generateId(), category: 'urgenza', section: 'anamnesi', label: t.label, text: t.text, isDefault: true }));
+      MedicalTemplates.urgenza.esameObiettivo.forEach(t => defaultTemplates.push({ id: generateId(), category: 'urgenza', section: 'esameObiettivo', label: t.label, text: t.text, isDefault: true }));
+      MedicalTemplates.urgenza.conclusioni.forEach(t => defaultTemplates.push({ id: generateId(), category: 'urgenza', section: 'conclusioni', label: t.label, text: t.text, isDefault: true }));
 
       // Terapie
       MedicalTemplates.terapie.forEach(t => defaultTemplates.push({ id: generateId(), category: 'terapie', section: 'generale', label: t.label, text: t.text, isDefault: true }));
@@ -396,8 +409,11 @@ class LocalStorageFallbackService implements StorageService {
       // Esami complementari
       MedicalTemplates.esami_complementari.forEach(t => defaultTemplates.push({ id: generateId(), category: 'esame_complementare', section: 'nome', label: t.label, text: t.text, note: t.note, isDefault: true }));
 
-      await this.saveToStorage('templates', defaultTemplates);
-      return defaultTemplates;
+      // Keep user's custom templates that aren't obsolete
+      const customTemplates = templates.filter(t => !t.isDefault && (t.category as string) !== 'ginecologia' && (t.category as string) !== 'ostetricia');
+      const updated = [...customTemplates, ...defaultTemplates];
+      await this.saveToStorage('templates', updated);
+      return updated;
     }
 
     // For existing users: seed esame_complementare if not yet present

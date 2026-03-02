@@ -19,10 +19,9 @@ import {
   SelectItem
 } from "@nextui-org/react";
 import { FileText, ChevronRight, Plus, Calendar, Eye } from "lucide-react";
-import { PatientService, VisitService, PreferenceService } from "../../services/OfflineServices";
+import { PatientService, VisitService } from "../../services/OfflineServices";
 import { Visit } from "../../types/Storage";
 import { PageHeader } from "../../components/PageHeader";
-import { calcolaStimePesoFetale } from "../../utils/fetalWeightUtils";
 
 // Helper for search icon
 const SearchIcon = (props: any) => (
@@ -69,16 +68,7 @@ export default function Visite() {
   const [filterTipo, setFilterTipo] = useState<string>("tutti");
   const [page, setPage] = useState(1);
   const { isOpen, onOpen, onClose } = useDisclosure();
-  const [fetalFormula, setFetalFormula] = useState("hadlock4");
   const rowsPerPage = 10;
-
-  useEffect(() => {
-    PreferenceService.getPreferences()
-      .then((prefs) => {
-        if (prefs?.formulaPesoFetale) setFetalFormula(prefs.formulaPesoFetale as string);
-      })
-      .catch(() => {});
-  }, [isOpen]); // Reload when modal opens
 
   useEffect(() => {
     const load = async () => {
@@ -147,9 +137,10 @@ export default function Visite() {
   };
 
   const getVisitTypeLabel = (tipo?: Visit["tipo"]) => {
-    if (tipo === "ginecologica") return "Ginecologia";
-    if (tipo === "ginecologica_pediatrica") return "Ginecologia Pediatrica";
-    if (tipo === "ostetrica") return "Ostetricia";
+    if (tipo === "bilancio_salute") return "Bilancio di Salute";
+    if (tipo === "patologia") return "Patologia";
+    if (tipo === "controllo") return "Controllo";
+    if (tipo === "urgenza") return "Urgenza";
     return "Generale";
   };
 
@@ -164,16 +155,16 @@ export default function Visite() {
     return value;
   };
 
-  const renderEcografiaImages = (images?: string[]) => {
+  const renderImages = (images?: string[]) => {
     if (!images || images.length === 0) return null;
     return (
       <Card shadow="sm">
         <CardBody className="space-y-3">
-          <p className="text-xs uppercase tracking-wide text-gray-500">Immagini ecografia</p>
+          <p className="text-xs uppercase tracking-wide text-gray-500">Immagini allegate</p>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             {images.map((image, index) => (
               <a
-                key={`ecografia-${index}`}
+                key={`immagine-${index}`}
                 href={image}
                 target="_blank"
                 rel="noreferrer"
@@ -181,7 +172,7 @@ export default function Visite() {
               >
                 <img
                   src={image}
-                  alt={`Ecografia ${index + 1}`}
+                  alt={`Immagine ${index + 1}`}
                   className="w-full h-28 object-cover"
                 />
               </a>
@@ -214,7 +205,7 @@ export default function Visite() {
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
       <PageHeader
-        title="Gestione Visite"
+        title="Gestione Visite Pediatriche"
         subtitle="Visualizza lo storico completo delle visite effettuate."
         icon={Calendar}
         iconColor="primary"
@@ -242,9 +233,10 @@ export default function Visite() {
               variant="bordered"
             >
               <SelectItem key="tutti">Tutti</SelectItem>
-              <SelectItem key="ginecologica">Ginecologica</SelectItem>
-              <SelectItem key="ginecologica_pediatrica">Ginecologica Pediatrica</SelectItem>
-              <SelectItem key="ostetrica">Ostetrica</SelectItem>
+              <SelectItem key="bilancio_salute">Bilancio di Salute</SelectItem>
+              <SelectItem key="patologia">Patologia</SelectItem>
+              <SelectItem key="controllo">Controllo</SelectItem>
+              <SelectItem key="urgenza">Urgenza</SelectItem>
             </Select>
             <Input
               type="date"
@@ -295,10 +287,18 @@ export default function Visite() {
                     <Chip
                       size="sm"
                       variant="flat"
-                      color={(visit.tipo === 'ginecologica' || visit.tipo === 'ginecologica_pediatrica') ? 'secondary' : visit.tipo === 'ostetrica' ? 'warning' : 'primary'}
+                      color={
+                        visit.tipo === "bilancio_salute"
+                          ? "success"
+                          : visit.tipo === "patologia"
+                            ? "danger"
+                            : visit.tipo === "urgenza"
+                              ? "warning"
+                              : "primary"
+                      }
                       className="capitalize"
                     >
-                      {visit.tipo}
+                      {getVisitTypeLabel(visit.tipo)}
                     </Chip>
                   </div>
                   <div className="col-span-4">
@@ -328,7 +328,7 @@ export default function Visite() {
                         }}
                         aria-label="Modifica visita"
                       >
-                      <ChevronRight size={18} className="text-gray-400" />
+                        <ChevronRight size={18} className="text-gray-400" />
                       </Button>
                     </div>
                   </div>
@@ -380,11 +380,13 @@ export default function Visite() {
                   <Chip
                     variant="flat"
                     color={
-                      selectedVisit.tipo === "ginecologica"
-                        ? "secondary"
-                        : selectedVisit.tipo === "ostetrica"
-                          ? "warning"
-                          : "primary"
+                      selectedVisit.tipo === "bilancio_salute"
+                        ? "success"
+                        : selectedVisit.tipo === "patologia"
+                          ? "danger"
+                          : selectedVisit.tipo === "urgenza"
+                            ? "warning"
+                            : "primary"
                     }
                   >
                     {getVisitTypeLabel(selectedVisit.tipo)}
@@ -429,94 +431,26 @@ export default function Visite() {
                   </CardBody>
                 </Card>
 
-                {(selectedVisit.tipo === "ginecologica" || selectedVisit.tipo === "ginecologica_pediatrica") && selectedVisit.ginecologia && (
+                {selectedVisit.pediatria && (
                   <>
                     <Divider />
-                    <Card shadow="sm" className="bg-pink-50/60">
+                    <Card shadow="sm" className="bg-success-50/60">
                       <CardBody className="space-y-3">
-                        <p className="text-xs uppercase tracking-wide text-pink-700">Dettagli ginecologici</p>
-                        {selectedVisit.tipo === "ginecologica_pediatrica" ? (
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-sm">
-                            <p><span className="font-medium">Menarca:</span> {selectedVisit.ginecologia.menarca || "Non compilato"}</p>
-                            <p><span className="font-medium">Vaccinazione HPV:</span> {selectedVisit.ginecologia.vaccinazioneHPV ? "Si" : "No"}</p>
-                            <p><span className="font-medium">Stadio di Tanner (femmina):</span> {selectedVisit.ginecologia.stadioTannerFemmina || "Non compilato"}</p>
-                          </div>
-                        ) : (
-                          <>
-                            <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-sm">
-                              <p><span className="font-medium">Gravidanze:</span> {selectedVisit.ginecologia.gravidanze}</p>
-                              <p><span className="font-medium">Parti:</span> {selectedVisit.ginecologia.parti}</p>
-                              <p><span className="font-medium">Aborti:</span> {selectedVisit.ginecologia.aborti}</p>
-                            </div>
-                            {selectedVisit.ginecologia.ultimaMestruazione && (
-                              <p className="text-sm">
-                                <span className="font-medium">Ultima mestruazione:</span> {formatDate(selectedVisit.ginecologia.ultimaMestruazione)}
-                              </p>
-                            )}
-                          </>
-                        )}
-                      </CardBody>
-                    </Card>
-                    {renderEcografiaImages(selectedVisit.ginecologia.ecografiaImmagini)}
-                  </>
-                )}
+                        <p className="text-xs uppercase tracking-wide text-success-700">Dettagli pediatrici</p>
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 text-sm mt-2">
+                          {selectedVisit.pediatria.peso && <p><span className="font-medium text-gray-700">Peso:</span> <br />{selectedVisit.pediatria.peso} kg {selectedVisit.pediatria.percentilePeso ? `(${selectedVisit.pediatria.percentilePeso})` : ""}</p>}
+                          {selectedVisit.pediatria.altezza && <p><span className="font-medium text-gray-700">Altezza:</span> <br />{selectedVisit.pediatria.altezza} cm {selectedVisit.pediatria.percentileAltezza ? `(${selectedVisit.pediatria.percentileAltezza})` : ""}</p>}
+                          {selectedVisit.pediatria.circonferenzaCranica && <p><span className="font-medium text-gray-700">CC:</span> <br />{selectedVisit.pediatria.circonferenzaCranica} cm {selectedVisit.pediatria.percentileCC ? `(${selectedVisit.pediatria.percentileCC})` : ""}</p>}
+                          {selectedVisit.pediatria.pressioneArteriosa && <p><span className="font-medium text-gray-700">Pressione Arteriosa:</span> <br />{selectedVisit.pediatria.pressioneArteriosa}</p>}
 
-                {selectedVisit.ostetricia && (
-                  <>
-                    <Divider />
-                    <Card shadow="sm" className="bg-purple-50/60">
-                      <CardBody className="space-y-3">
-                        <p className="text-xs uppercase tracking-wide text-purple-700">Dettagli ostetrici</p>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
-                          <p><span className="font-medium">Settimane di gestazione:</span> {selectedVisit.ostetricia.settimaneGestazione || "Non compilato"}</p>
-                          <p><span className="font-medium">DPP:</span> {selectedVisit.ostetricia.dataPresunta ? formatDate(selectedVisit.ostetricia.dataPresunta) : "Non compilato"}</p>
-                          <p><span className="font-medium">Peso attuale:</span> {selectedVisit.ostetricia.pesoAttuale || 0} kg</p>
-                          <p><span className="font-medium">Battiti fetali:</span> {selectedVisit.ostetricia.battitiFetali || "Non compilato"}</p>
+                          {selectedVisit.pediatria.allattamento && <p><span className="font-medium text-gray-700">Allattamento:</span> <br />{selectedVisit.pediatria.allattamento}</p>}
+                          {selectedVisit.pediatria.svezzamento && <p><span className="font-medium text-gray-700">Svezzamento:</span> <br />{selectedVisit.pediatria.svezzamento}</p>}
+                          {selectedVisit.pediatria.vaccinazioni && <p><span className="font-medium text-gray-700">Vaccinazioni:</span> <br />{selectedVisit.pediatria.vaccinazioni}</p>}
+                          {selectedVisit.pediatria.tappeSviluppo && <p><span className="font-medium text-gray-700">Sviluppo Motorio:</span> <br />{selectedVisit.pediatria.tappeSviluppo}</p>}
                         </div>
                       </CardBody>
                     </Card>
-
-                    {selectedVisit.ostetricia.biometriaFetale && (() => {
-                      const bio = selectedVisit.ostetricia!.biometriaFetale!;
-                      const hasMisura = (bio.bpdMm > 0 || bio.hcMm > 0 || bio.acMm > 0 || bio.flMm > 0);
-                      if (!hasMisura) return null;
-                      const scale = calcolaStimePesoFetale(bio);
-                      const result = scale[fetalFormula as keyof typeof scale];
-                      
-                      return (
-                        <Card shadow="sm" className="bg-purple-50/30 border border-purple-100">
-                          <CardBody className="space-y-3">
-                            <p className="text-xs uppercase tracking-wide text-purple-700">BIOMETRIA FETALE</p>
-                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm mb-3">
-                              {bio.bpdMm > 0 && <p><span className="font-medium">DBP:</span> {bio.bpdMm} mm</p>}
-                              {bio.hcMm > 0 && <p><span className="font-medium">CC:</span> {bio.hcMm} mm</p>}
-                              {bio.acMm > 0 && <p><span className="font-medium">CA:</span> {bio.acMm} mm</p>}
-                              {bio.flMm > 0 && <p><span className="font-medium">FL:</span> {bio.flMm} mm</p>}
-                            </div>
-                            
-                            <div className="bg-white/60 rounded-lg border border-purple-100 p-3 flex justify-between items-center">
-                              <div>
-                                <p className="text-sm font-semibold text-purple-900">
-                                  Peso Fetale Stimato
-                                  <span className="text-purple-600 font-normal ml-1">
-                                    {result?.nome || fetalFormula}
-                                  </span>
-                                </p>
-                              </div>
-                              <div>
-                                {result && result.calcolabile ? (
-                                  <p className="text-xl font-bold text-purple-800">{result.pesoGrammi} g</p>
-                                ) : (
-                                  <p className="text-sm text-gray-500">Dati insufficienti</p>
-                                )}
-                              </div>
-                            </div>
-                          </CardBody>
-                        </Card>
-                      );
-                    })()}
-
-                    {renderEcografiaImages(selectedVisit.ostetricia.ecografiaImmagini)}
+                    {renderImages(selectedVisit.pediatria.immagini)}
                   </>
                 )}
               </ModalBody>

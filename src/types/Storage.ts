@@ -38,74 +38,33 @@ export interface Visit {
   esamiObiettivo: string;
   conclusioniDiagnostiche: string;
   terapie: string;
-  tipo?: 'generale' | 'ginecologica' | 'ginecologica_pediatrica' | 'ostetrica';
-  // Campi specifici ginecologia
-  ginecologia?: {
-    gravidanze: number;
-    parti: number;
-    partiSpontanei?: number;
-    partiCesarei?: number;
-    aborti: number;
-    /** Aborti spontanei (AS) */
-    abortiSpontanei?: number;
-    /** Interruzioni volontarie gravidanza (IVG) */
-    ivg?: number;
-    /** Menarca (eta o note) */
-    menarca?: string;
-    /** Stadio di Tanner (femmina) */
-    stadioTannerFemmina?: string;
-    ultimaMestruazione: string;
-    prestazione: string;
-    problemaClinico: string;
-    chirurgiaPregessa: string;
-    allergie: string;
-    familiarita: string;
-    terapiaInAtto: string;
-    vaccinazioneHPV: boolean;
-    esameBimanuale: string;
-    speculum: string;
-    ecografiaTV: string;
-    accertamenti: string;
-    conclusione: string;
-    terapiaSpecifica: string;
-    /** Data URL (base64) immagini ecografia */
-    ecografiaImmagini?: string[];
-  };
-  // Campi specifici ostetricia
-  ostetricia?: {
-    settimaneGestazione: string;
-    ultimaMestruazione: string;
-    dataPresunta: string;
-    problemaClinico: string;
-    gravidanzePrec: number;
-    partiPrec: number;
-    partiPrecSpontanei?: number;
-    partiPrecCesarei?: number;
-    abortiPrec: number;
-    /** Aborti spontanei precedenti (AS) */
-    abortiPrecSpontanei?: number;
-    /** Interruzioni volontarie gravidanza precedenti (IVG) */
-    ivgPrec?: number;
-    pesoPreGravidanza: number;
-    pesoAttuale: number;
-    pressioneArteriosa: string;
-    altezzaUterina: string;
-    battitiFetali: string;
-    movimentiFetali: string;
-    esamiEseguiti: string;
-    ecografiaOffice: string;
-    noteOstetriche: string;
-    prestazione: string;
-    esameObiettivo: string;
-    /** Data URL (base64) immagini ecografia */
-    ecografiaImmagini?: string[];
-    /** Biometria fetale per stima peso (mm). Usato per le 3 scale: Hadlock 4p, Shepard, Hadlock 3p */
-    biometriaFetale?: {
-      bpdMm: number;
-      hcMm: number;
-      acMm: number;
-      flMm: number;
-    };
+  tipo?: 'generale' | 'bilancio_salute' | 'patologia' | 'controllo' | 'urgenza';
+  // Campi specifici pediatria
+  pediatria?: {
+    /** Parametri Auxologici */
+    peso?: number; // In kg
+    altezza?: number; // In cm
+    circonferenzaCranica?: number; // In cm
+    bmi?: number;
+    percentilePeso?: string;
+    percentileAltezza?: string;
+    percentileCC?: string;
+    percentileBmi?: string;
+
+    /** Sviluppo e Nutrizione */
+    allattamento?: string; // Es. Materno esclusivo, Misto, Formula
+    svezzamento?: string;
+    tappeSviluppo?: string; // Es. Controllo capo, seduto, deambulazione, linguaggio
+
+    /** Anamnesi e Dati Clinici */
+    vaccinazioni?: string;
+    pressioneArteriosa?: string;
+    temperatura?: string;
+    saturazioneO2?: string;
+    notePediatriche?: string;
+
+    /** Array di immagini in base64 (es. foto referti o lesioni cutanee) */
+    immagini?: string[];
   };
   createdAt: string;
   updatedAt: string;
@@ -154,8 +113,8 @@ export interface Document {
 
 export interface MedicalTemplate {
   id: string;
-  category: 'ginecologia' | 'ostetricia' | 'terapie' | 'esame_complementare';
-  section: 'prestazione' | 'esameObiettivo' | 'conclusioni' | 'generale' | 'nome' | 'note';
+  category: 'bilancio_salute' | 'patologia' | 'controllo' | 'urgenza' | 'terapie' | 'esame_complementare';
+  section: 'anamnesi' | 'esameObiettivo' | 'conclusioni' | 'generale' | 'nome' | 'note';
   label: string;
   text: string;
   note?: string;
