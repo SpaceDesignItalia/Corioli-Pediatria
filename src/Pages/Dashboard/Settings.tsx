@@ -114,7 +114,7 @@ const SettingsScreen = () => {
     modalitaCompatta: false,
     animazioniRidotte: false,
     visitaGinecologicaPediatricaEnabled: false,
-    formulaPesoFetale: 'hadlock4', // hadlock4, shepard, hadlock3
+    formulaPesoFetale: "hadlock4", // hadlock4, shepard, hadlock3
     showDoctorPhoneInPdf: true,
     showDoctorEmailInPdf: true,
   });
@@ -258,27 +258,50 @@ const SettingsScreen = () => {
   }, []);
 
   useEffect(() => {
-    const api = (window as unknown as {
-      electronAPI?: {
-        getAppVersion?: () => Promise<string>;
-        updaterCheck?: () => Promise<{ version?: string; noUpdate?: boolean; error?: string }>;
-        updaterQuitAndInstall?: () => void;
-        onUpdaterChecking?: (cb: () => void) => void;
-        onUpdaterAvailable?: (cb: (info: { version: string }) => void) => void;
-        onUpdaterNotAvailable?: (cb: () => void) => void;
-        onUpdaterProgress?: (cb: (p: { percent: number }) => void) => void;
-        onUpdaterDownloaded?: (cb: () => void) => void;
-        onUpdaterError?: (cb: (msg: string) => void) => void;
-        removeAllListeners?: (channel: string) => void;
-      };
-    }).electronAPI;
+    const api = (
+      window as unknown as {
+        electronAPI?: {
+          getAppVersion?: () => Promise<string>;
+          updaterCheck?: () => Promise<{
+            version?: string;
+            noUpdate?: boolean;
+            error?: string;
+          }>;
+          updaterQuitAndInstall?: () => void;
+          onUpdaterChecking?: (cb: () => void) => void;
+          onUpdaterAvailable?: (
+            cb: (info: { version: string }) => void,
+          ) => void;
+          onUpdaterNotAvailable?: (cb: () => void) => void;
+          onUpdaterProgress?: (cb: (p: { percent: number }) => void) => void;
+          onUpdaterDownloaded?: (cb: () => void) => void;
+          onUpdaterError?: (cb: (msg: string) => void) => void;
+          removeAllListeners?: (channel: string) => void;
+        };
+      }
+    ).electronAPI;
     if (!api?.getAppVersion) return;
     api.getAppVersion().then((v) => setAppVersion(v || ""));
-    api.onUpdaterChecking?.(() => { setUpdateError(null); setUpdateChecking(true); });
-    api.onUpdaterAvailable?.((info) => { setUpdateChecking(false); setUpdateAvailable(info?.version ?? "Nuova versione"); });
-    api.onUpdaterNotAvailable?.(() => { setUpdateChecking(false); setUpdateAvailable(null); setUpdateError(null); });
-    api.onUpdaterDownloaded?.(() => { setUpdateDownloaded(true); });
-    api.onUpdaterError?.((msg) => { setUpdateChecking(false); setUpdateError(msg); });
+    api.onUpdaterChecking?.(() => {
+      setUpdateError(null);
+      setUpdateChecking(true);
+    });
+    api.onUpdaterAvailable?.((info) => {
+      setUpdateChecking(false);
+      setUpdateAvailable(info?.version ?? "Nuova versione");
+    });
+    api.onUpdaterNotAvailable?.(() => {
+      setUpdateChecking(false);
+      setUpdateAvailable(null);
+      setUpdateError(null);
+    });
+    api.onUpdaterDownloaded?.(() => {
+      setUpdateDownloaded(true);
+    });
+    api.onUpdaterError?.((msg) => {
+      setUpdateChecking(false);
+      setUpdateError(msg);
+    });
     return () => {
       api.removeAllListeners?.("updater:checking");
       api.removeAllListeners?.("updater:available");
@@ -290,7 +313,17 @@ const SettingsScreen = () => {
   }, []);
 
   const handleCheckForUpdates = async () => {
-    const api = (window as unknown as { electronAPI?: { updaterCheck?: () => Promise<{ version?: string; noUpdate?: boolean; error?: string }> } }).electronAPI;
+    const api = (
+      window as unknown as {
+        electronAPI?: {
+          updaterCheck?: () => Promise<{
+            version?: string;
+            noUpdate?: boolean;
+            error?: string;
+          }>;
+        };
+      }
+    ).electronAPI;
     if (!api?.updaterCheck) return;
     setUpdateError(null);
     setUpdateAvailable(null);
@@ -307,7 +340,11 @@ const SettingsScreen = () => {
   };
 
   const handleQuitAndInstall = () => {
-    const api = (window as unknown as { electronAPI?: { updaterQuitAndInstall?: () => void } }).electronAPI;
+    const api = (
+      window as unknown as {
+        electronAPI?: { updaterQuitAndInstall?: () => void };
+      }
+    ).electronAPI;
     api?.updaterQuitAndInstall?.();
   };
 
@@ -403,7 +440,9 @@ const SettingsScreen = () => {
       const prefs = await PreferenceService.getPreferences();
       if (prefs) {
         setPreferences((prev) => ({ ...prev, ...prefs }));
-        setNotificationsEnabled((prefs.notificationsEnabled as boolean) ?? true);
+        setNotificationsEnabled(
+          (prefs.notificationsEnabled as boolean) ?? true,
+        );
         setPdfTheme((prefs.pdfTheme as string) ?? "light");
         if (prefs.lastBackupDate) {
           setLastBackupDate(prefs.lastBackupDate as string);
@@ -430,7 +469,6 @@ const SettingsScreen = () => {
   const handleDoctorInfoChange = (field: string, value: string) => {
     setDoctorInfo((prev) => ({ ...prev, [field]: value }));
   };
-
 
   const normalizeName = (value: string) =>
     (value || "")
@@ -855,7 +893,7 @@ const SettingsScreen = () => {
           field.key === "codiceFiscale" &&
           mergedValue &&
           Boolean(target.codiceFiscaleGenerato) !==
-          Boolean(generatedByValue[mergedValue])
+            Boolean(generatedByValue[mergedValue])
         ) {
           basePayload.codiceFiscaleGenerato = Boolean(
             generatedByValue[mergedValue],
@@ -867,11 +905,11 @@ const SettingsScreen = () => {
       const defaultValue =
         field.key === "codiceFiscale"
           ? choosePreferredCodiceFiscale(
-            rawValues,
-            target.codiceFiscale,
-            generatedByValue,
-            Boolean(target.codiceFiscaleGenerato),
-          )
+              rawValues,
+              target.codiceFiscale,
+              generatedByValue,
+              Boolean(target.codiceFiscaleGenerato),
+            )
           : String(target[field.key] || "").trim() || rawValues[0];
 
       conflictFields.push({
@@ -1162,8 +1200,6 @@ const SettingsScreen = () => {
     }
   };
 
-
-
   return (
     <div className="max-w-6xl mx-auto space-y-8">
       {/* Header */}
@@ -1191,12 +1227,15 @@ const SettingsScreen = () => {
         </Card>
       )}
 
-      {typeof (window as unknown as { electronAPI?: unknown }).electronAPI !== "undefined" && (
+      {typeof (window as unknown as { electronAPI?: unknown }).electronAPI !==
+        "undefined" && (
         <Card className="shadow-sm border border-default-200">
           <CardBody className="py-2 px-4">
             <div className="flex items-center justify-between w-full gap-3">
               <div className="flex items-center gap-2 flex-shrink-0">
-                <h2 className="text-base font-semibold text-gray-900">Aggiornamenti</h2>
+                <h2 className="text-base font-semibold text-gray-900">
+                  Aggiornamenti
+                </h2>
               </div>
               <div className="flex items-center gap-2 ml-auto overflow-x-auto whitespace-nowrap">
                 {appVersion && (
@@ -1210,7 +1249,9 @@ const SettingsScreen = () => {
                   color="primary"
                   onPress={handleCheckForUpdates}
                   isLoading={updateChecking}
-                  startContent={!updateChecking ? <RefreshCw size={16} /> : undefined}
+                  startContent={
+                    !updateChecking ? <RefreshCw size={16} /> : undefined
+                  }
                 >
                   Controlla
                 </Button>
@@ -1299,9 +1340,7 @@ const SettingsScreen = () => {
                 label="Nome"
                 value={doctorInfo.nome}
                 isRequired
-                onValueChange={(value) =>
-                  handleDoctorInfoChange("nome", value)
-                }
+                onValueChange={(value) => handleDoctorInfoChange("nome", value)}
                 variant="bordered"
               />
               <Input
@@ -1385,11 +1424,7 @@ const SettingsScreen = () => {
                                 {amb.nome}
                               </h4>
                               {amb.isPrimario && (
-                                <Chip
-                                  size="sm"
-                                  color="success"
-                                  variant="flat"
-                                >
+                                <Chip size="sm" color="success" variant="flat">
                                   In uso
                                 </Chip>
                               )}
@@ -1521,7 +1556,6 @@ const SettingsScreen = () => {
           </CardBody>
         </Card>
 
-
         {/* Backup e Dati */}
         <div className="w-full">
           <Card className="shadow-lg h-full">
@@ -1573,11 +1607,11 @@ const SettingsScreen = () => {
                     >
                       {lastBackupDate
                         ? new Date(lastBackupDate).toLocaleDateString() +
-                        " " +
-                        new Date(lastBackupDate).toLocaleTimeString([], {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })
+                          " " +
+                          new Date(lastBackupDate).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })
                         : "Mai eseguito"}
                     </span>
                   </div>
@@ -1590,7 +1624,8 @@ const SettingsScreen = () => {
                 </div>
 
                 <p className="text-xs text-center text-default-400 px-4">
-                  Gestione avanzata permette importazioni, cancellazioni e reset.
+                  Gestione avanzata permette importazioni, cancellazioni e
+                  reset.
                 </p>
               </div>
             </CardBody>
@@ -1831,7 +1866,11 @@ const SettingsScreen = () => {
           </Tabs>
 
           <p className="text-sm text-default-500 mb-3">
-            I modelli compaiono nei pulsanti &quot;Modello&quot; / &quot;Modelli Esame&quot; durante la compilazione. Il <strong>nome in menu</strong> è ciò che vedi quando cerchi; il <strong>contenuto inserito</strong> è il testo che va nel referto quando lo selezioni.
+            I modelli compaiono nei pulsanti &quot;Modello&quot; / &quot;Modelli
+            Esame&quot; durante la compilazione. Il{" "}
+            <strong>nome in menu</strong> è ciò che vedi quando cerchi; il{" "}
+            <strong>contenuto inserito</strong> è il testo che va nel referto
+            quando lo selezioni.
           </p>
           <Table aria-label="Tabella Modelli">
             <TableHeader>
@@ -2202,6 +2241,6 @@ const SettingsScreen = () => {
       </Modal>
     </div>
   );
-}
+};
 
 export default SettingsScreen;
