@@ -54,7 +54,7 @@ export default function AppNavbar() {
   };
 
   const BLOCKED_STORAGE_KEY = "blocked_users";
-  const ONE_HOUR_MS = 5 * 60 * 1000; // 5 minutes
+  const ONE_HOUR_MS = 1000; // 5 minutes
 
   useEffect(() => {
     loadDoctor();
