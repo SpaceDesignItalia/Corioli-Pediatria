@@ -54,7 +54,7 @@ export default function AppNavbar() {
   };
 
   const BLOCKED_STORAGE_KEY = "blocked_users";
-  const ONE_HOUR_MS = 1000; // 5 minutes
+  const ONE_HOUR_MS = 5 * 60 * 1000; // 5 minutes
 
   useEffect(() => {
     loadDoctor();
@@ -84,6 +84,7 @@ export default function AppNavbar() {
 
         if (doctor) {
           const { blocked, reason } = await sendOnlineStatus(doctor);
+          if (blocked === null) return;
           const payload = {
             blocked: blocked,
             reason: reason,
@@ -94,7 +95,7 @@ export default function AppNavbar() {
             JSON.stringify(payload),
           );
 
-          if (blocked) navigate("/blocked");
+          if (blocked === true) navigate("/blocked");
         }
       } catch (e) {
         console.error("checkFeature blocked_users:", e);
@@ -105,7 +106,7 @@ export default function AppNavbar() {
 
   const sendOnlineStatus = async (
     doctor: Doctor,
-  ): Promise<{ blocked: boolean; reason: string | null }> => {
+  ): Promise<{ blocked: boolean | null; reason: string | null }> => {
     try {
       const result = await axios.post(
         `${import.meta.env.VITE_API_URL}/clients/heartbeat`,
@@ -126,7 +127,7 @@ export default function AppNavbar() {
       };
     } catch (e) {
       console.error("sendOnlineStatus:", e);
-      return { blocked: true, reason: null };
+      return { blocked: null, reason: null };
     }
   };
 
