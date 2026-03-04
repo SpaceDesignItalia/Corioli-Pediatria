@@ -20,27 +20,46 @@ import {
   DropdownTrigger,
   DropdownMenu,
   DropdownItem,
-  Chip
+  Chip,
 } from "@nextui-org/react";
 import { useSearchParams, useNavigate, useParams } from "react-router-dom";
-import { PatientService, VisitService, TemplateService, DoctorService } from "../../services/OfflineServices";
+import {
+  PatientService,
+  VisitService,
+  TemplateService,
+  DoctorService,
+} from "../../services/OfflineServices";
 import { PdfService } from "../../services/PdfService";
 import { Patient, Visit, MedicalTemplate } from "../../types/Storage";
 import { calculateAge } from "../../utils/dateUtils";
-import { ArrowLeft, Printer, ClipboardList, AlertCircle, Save, User, ImagePlus, Trash2, Copy, X } from "lucide-react";
+import {
+  ArrowLeft,
+  Printer,
+  ClipboardList,
+  AlertCircle,
+  Save,
+  User,
+  ImagePlus,
+  Trash2,
+  Copy,
+  X,
+} from "lucide-react";
 import { useToast } from "../../contexts/ToastContext";
 import { Breadcrumb } from "../../components/Breadcrumb";
 import { CodiceFiscaleValue } from "../../components/CodiceFiscaleValue";
-import { getDoctorProfileIncompleteMessage, isDoctorProfileComplete } from "../../utils/doctorProfile";
+import {
+  getDoctorProfileIncompleteMessage,
+  isDoctorProfileComplete,
+} from "../../utils/doctorProfile";
 
 const TemplateSelector = ({
   templates,
   onSelect,
-  label = "Modello"
+  label = "Modello",
 }: {
-  templates: MedicalTemplate[],
-  onSelect: (text: string) => void,
-  label?: string
+  templates: MedicalTemplate[];
+  onSelect: (text: string) => void;
+  label?: string;
 }) => {
   if (templates.length === 0) return null;
 
@@ -60,12 +79,15 @@ const TemplateSelector = ({
       <DropdownMenu
         aria-label="Medical Templates"
         onAction={(key) => {
-          const selected = templates.find(t => t.id === key);
+          const selected = templates.find((t) => t.id === key);
           if (selected) onSelect(selected.text);
         }}
       >
         {templates.map((t) => (
-          <DropdownItem key={t.id} description={t.text.substring(0, 50) + "..."}>
+          <DropdownItem
+            key={t.id}
+            description={t.text.substring(0, 50) + "..."}
+          >
             {t.label}
           </DropdownItem>
         ))}
@@ -76,12 +98,16 @@ const TemplateSelector = ({
 
 const createDefaultVisitData = () => ({
   dataVisita: new Date().toISOString().slice(0, 10),
-  tipo: "bilancio_salute" as 'bilancio_salute' | 'patologia' | 'controllo' | 'urgenza',
+  tipo: "bilancio_salute" as
+    | "bilancio_salute"
+    | "patologia"
+    | "controllo"
+    | "urgenza",
   descrizioneClinica: "",
   anamnesi: "",
   esamiObiettivo: "",
   conclusioniDiagnostiche: "",
-  terapie: ""
+  terapie: "",
 });
 
 const createDefaultPediatriaData = () => ({
@@ -100,7 +126,7 @@ const createDefaultPediatriaData = () => ({
   temperatura: "",
   saturazioneO2: "",
   notePediatriche: "",
-  immagini: [] as string[]
+  immagini: [] as string[],
 });
 
 export default function AddVisit() {
@@ -118,15 +144,22 @@ export default function AddVisit() {
   const [error, setError] = useState<string | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [fullscreenImage, setFullscreenImage] = useState<string | null>(null);
-  const [isIncludeImagesModalOpen, setIsIncludeImagesModalOpen] = useState(false);
+  const [isIncludeImagesModalOpen, setIsIncludeImagesModalOpen] =
+    useState(false);
   const [includeImagesCount, setIncludeImagesCount] = useState(0);
-  const [copiedPreviousType, setCopiedPreviousType] = useState<string | null>(null);
-  const includeImagesResolverRef = useRef<((value: boolean) => void) | null>(null);
+  const [copiedPreviousType, setCopiedPreviousType] = useState<string | null>(
+    null,
+  );
+  const includeImagesResolverRef = useRef<((value: boolean) => void) | null>(
+    null,
+  );
   const initialLoadDone = useRef(false);
 
   const [allTemplates, setAllTemplates] = useState<MedicalTemplate[]>([]);
   const [visitData, setVisitData] = useState(createDefaultVisitData);
-  const [pediatriaData, setPediatriaData] = useState(createDefaultPediatriaData);
+  const [pediatriaData, setPediatriaData] = useState(
+    createDefaultPediatriaData,
+  );
 
   useEffect(() => {
     const loadData = async () => {
@@ -150,9 +183,12 @@ export default function AddVisit() {
       const loadPatientVisits = async (pId: string) => {
         const visitsData = await VisitService.getVisitsByPatientId(pId);
         const sortedVisits = visitsData.sort((a, b) => {
-          const dateDiff = new Date(b.dataVisita).getTime() - new Date(a.dataVisita).getTime();
+          const dateDiff =
+            new Date(b.dataVisita).getTime() - new Date(a.dataVisita).getTime();
           if (dateDiff !== 0) return dateDiff;
-          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+          return (
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+          );
         });
         setPatientVisits(sortedVisits);
       };
@@ -169,14 +205,21 @@ export default function AddVisit() {
               descrizioneClinica: visit.descrizioneClinica || "",
               anamnesi: visit.anamnesi || "",
               esamiObiettivo: visit.esamiObiettivo || "",
-              conclusioniDiagnostiche: [visit.conclusioniDiagnostiche, visit.terapie].filter(Boolean).join('\n\n'),
-              terapie: ""
+              conclusioniDiagnostiche: [
+                visit.conclusioniDiagnostiche,
+                visit.terapie,
+              ]
+                .filter(Boolean)
+                .join("\n\n"),
+              terapie: "",
             });
 
             if (visit.pediatria) {
-              setPediatriaData(prev => ({ ...prev, ...visit.pediatria }));
+              setPediatriaData((prev) => ({ ...prev, ...visit.pediatria }));
             }
-            const patientData = await PatientService.getPatientById(visit.patientId);
+            const patientData = await PatientService.getPatientById(
+              visit.patientId,
+            );
             setPatient(patientData);
             if (patientData) await loadPatientVisits(patientData.id);
           } else {
@@ -207,7 +250,9 @@ export default function AddVisit() {
           }
         }
       }
-      setTimeout(() => { initialLoadDone.current = true; }, 300);
+      setTimeout(() => {
+        initialLoadDone.current = true;
+      }, 300);
     };
     loadData();
   }, [searchParams, visitId]);
@@ -231,13 +276,17 @@ export default function AddVisit() {
   }, [fullscreenImage]);
 
   const handleTemplateSelect = (field: string, text: string) => {
-    setVisitData(prev => ({
+    setVisitData((prev) => ({
       ...prev,
-      [field]: prev[field as keyof typeof prev] ? `${prev[field as keyof typeof prev]}\n${text}` : text
+      [field]: prev[field as keyof typeof prev]
+        ? `${prev[field as keyof typeof prev]}\n${text}`
+        : text,
     }));
   };
 
-  const handleSubmit = async (e?: React.FormEvent | { preventDefault: () => void }) => {
+  const handleSubmit = async (
+    e?: React.FormEvent | { preventDefault: () => void },
+  ) => {
     if (e && e.preventDefault) e.preventDefault();
     if (!patient) {
       setError("Nessun paziente selezionato");
@@ -265,7 +314,7 @@ export default function AddVisit() {
         conclusioniDiagnostiche: visitData.conclusioniDiagnostiche,
         terapie: "",
         tipo: visitData.tipo as any,
-        pediatria: pediatriaData
+        pediatria: pediatriaData,
       };
 
       if (isEditMode && existingVisit) {
@@ -280,14 +329,20 @@ export default function AddVisit() {
       setTimeout(() => navigate(`/patient-history/${patient.id}`), 1000);
     } catch (error) {
       console.error("Errore nel salvataggio visita:", error);
-      setError(isEditMode ? "Errore nell'aggiornamento della visita" : "Errore nel salvataggio della visita");
+      setError(
+        isEditMode
+          ? "Errore nell'aggiornamento della visita"
+          : "Errore nel salvataggio della visita",
+      );
     } finally {
       setLoading(false);
     }
   };
 
   const getPreviousVisitByType = (tipo: string) => {
-    return patientVisits.find((v) => v.tipo === tipo && (!existingVisit || v.id !== existingVisit.id));
+    return patientVisits.find(
+      (v) => v.tipo === tipo && (!existingVisit || v.id !== existingVisit.id),
+    );
   };
 
   const handleCopyPreviousVisit = () => {
@@ -300,7 +355,7 @@ export default function AddVisit() {
         anamnesi: "",
         esamiObiettivo: "",
         conclusioniDiagnostiche: "",
-        terapie: ""
+        terapie: "",
       }));
       setPediatriaData(createDefaultPediatriaData());
       setCopiedPreviousType(null);
@@ -321,20 +376,22 @@ export default function AddVisit() {
       anamnesi: previousVisit.anamnesi || "",
       esamiObiettivo: previousVisit.esamiObiettivo || "",
       conclusioniDiagnostiche: previousVisit.conclusioniDiagnostiche || "",
-      terapie: previousVisit.terapie || ""
+      terapie: previousVisit.terapie || "",
     }));
 
     if (previousVisit.pediatria) {
       setPediatriaData((prev) => ({
         ...prev,
         ...previousVisit.pediatria,
-        immagini: previousVisit.pediatria?.immagini ?? []
+        immagini: previousVisit.pediatria?.immagini ?? [],
       }));
     }
 
     setHasUnsavedChanges(true);
     setCopiedPreviousType(currentType);
-    showToast(`Campi copiati dall'ultima visita ${currentType.replace('_', ' ')}.`);
+    showToast(
+      `Campi copiati dall'ultima visita ${currentType.replace("_", " ")}.`,
+    );
   };
 
   const blobToBase64 = (blob: Blob): Promise<string> =>
@@ -364,7 +421,10 @@ export default function AddVisit() {
     const currentImages = pediatriaData.immagini ?? [];
 
     if (currentImages.length >= maxImages) {
-      showToast(`Hai già raggiunto il massimo di ${maxImages} immagini.`, "info");
+      showToast(
+        `Hai già raggiunto il massimo di ${maxImages} immagini.`,
+        "info",
+      );
       return;
     }
 
@@ -382,13 +442,14 @@ export default function AddVisit() {
       const filesToLoad = validFiles.slice(0, availableSlots);
       const encoded = await Promise.all(filesToLoad.map(fileToDataUrl));
 
-      setPediatriaData(prev => ({
+      setPediatriaData((prev) => ({
         ...prev,
-        immagini: [...(prev.immagini ?? []), ...encoded]
+        immagini: [...(prev.immagini ?? []), ...encoded],
       }));
 
       if (initialLoadDone.current) setHasUnsavedChanges(true);
-      if (encoded.length > 0) showToast(`${encoded.length} immagine/i caricata/e.`);
+      if (encoded.length > 0)
+        showToast(`${encoded.length} immagine/i caricata/e.`);
     } catch (err) {
       console.error("Errore caricamento immagini:", err);
       showToast("Errore durante il caricamento delle immagini.", "error");
@@ -396,9 +457,9 @@ export default function AddVisit() {
   };
 
   const handleRemoveImage = (imageIndex: number) => {
-    setPediatriaData(prev => ({
+    setPediatriaData((prev) => ({
       ...prev,
-      immagini: (prev.immagini ?? []).filter((_, idx) => idx !== imageIndex)
+      immagini: (prev.immagini ?? []).filter((_, idx) => idx !== imageIndex),
     }));
     if (initialLoadDone.current) setHasUnsavedChanges(true);
   };
@@ -443,12 +504,23 @@ export default function AddVisit() {
 
     setPdfLoading(true);
     try {
-      const blob = await (PdfService as any).generatePediatricPDF?.(patient, currentVisit, { includeImages });
+      const blob = await (PdfService as any).generatePediatricPDF?.(
+        patient,
+        currentVisit,
+        { includeImages },
+      );
       if (!blob) {
-        showToast("Impossibile generare il PDF per la stampa. Assicurati che generatePediatricPDF sia implementato in PdfService.", "error");
+        showToast(
+          "Impossibile generare il PDF per la stampa. Assicurati che generatePediatricPDF sia implementato in PdfService.",
+          "error",
+        );
         return;
       }
-      const electronAPI = (window as unknown as { electronAPI?: { openPdfForPrint: (b64: string) => Promise<unknown> } }).electronAPI;
+      const electronAPI = (
+        window as unknown as {
+          electronAPI?: { openPdfForPrint: (b64: string) => Promise<unknown> };
+        }
+      ).electronAPI;
       if (electronAPI?.openPdfForPrint) {
         const base64 = await blobToBase64(blob);
         await electronAPI.openPdfForPrint(base64);
@@ -465,7 +537,9 @@ export default function AddVisit() {
           a.download = filename;
           a.click();
           URL.revokeObjectURL(pdfUrl);
-          showToast("PDF scaricato. Apri il file per visualizzarlo e stampare.");
+          showToast(
+            "PDF scaricato. Apri il file per visualizzarlo e stampare.",
+          );
         }
       }
     } catch (err) {
@@ -481,16 +555,20 @@ export default function AddVisit() {
     if (field === "tipo") {
       setCopiedPreviousType(null);
     }
-    setVisitData(prev => ({ ...prev, [field]: value }));
+    setVisitData((prev) => ({ ...prev, [field]: value }));
   };
 
   const handlePediatriaChange = (field: string, value: any) => {
     if (initialLoadDone.current) setHasUnsavedChanges(true);
-    setPediatriaData(prev => ({ ...prev, [field]: value }));
+    setPediatriaData((prev) => ({ ...prev, [field]: value }));
   };
 
   const handleNavigateCronologia = () => {
-    if (hasUnsavedChanges && !window.confirm("Modifiche non salvate. Uscire comunque?")) return;
+    if (
+      hasUnsavedChanges &&
+      !window.confirm("Modifiche non salvate. Uscire comunque?")
+    )
+      return;
     navigate(`/patient-history/${patient?.id}`);
   };
 
@@ -522,12 +600,18 @@ export default function AddVisit() {
   const breadcrumbItems = [
     { label: "Dashboard", path: "/" },
     { label: "Pazienti", path: "/pazienti" },
-    { label: `${patient.nome} ${patient.cognome}`, path: `/patient-history/${patient.id}` },
-    { label: isEditMode ? "Modifica visita" : "Nuova visita pediatrica" }
+    {
+      label: `${patient.nome} ${patient.cognome}`,
+      path: `/patient-history/${patient.id}`,
+    },
+    { label: isEditMode ? "Modifica visita" : "Nuova visita pediatrica" },
   ];
 
-  const hasPreviousVisitForCurrentType = Boolean(getPreviousVisitByType(visitData.tipo));
-  const canCopyOrClear = hasPreviousVisitForCurrentType || copiedPreviousType === visitData.tipo;
+  const hasPreviousVisitForCurrentType = Boolean(
+    getPreviousVisitByType(visitData.tipo),
+  );
+  const canCopyOrClear =
+    hasPreviousVisitForCurrentType || copiedPreviousType === visitData.tipo;
 
   return (
     <div className="max-w-[1200px] mx-auto space-y-6 pb-32">
@@ -537,19 +621,31 @@ export default function AddVisit() {
         <CardBody className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xl shrink-0">
-              {patient.nome[0]}{patient.cognome[0]}
+              {patient.nome[0]}
+              {patient.cognome[0]}
             </div>
             <div>
               <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2">
                 {patient.nome} {patient.cognome}
-                {hasUnsavedChanges && <Chip size="sm" color="warning" variant="flat">Non salvato</Chip>}
+                {hasUnsavedChanges && (
+                  <Chip size="sm" color="warning" variant="flat">
+                    Non salvato
+                  </Chip>
+                )}
               </h1>
               <p className="text-sm text-gray-500 flex items-center gap-2 flex-wrap">
-                <span className="text-gray-500"><CodiceFiscaleValue value={patient.codiceFiscale} generatedFromImport={Boolean(patient.codiceFiscaleGenerato)} /></span>
+                <span className="text-gray-500">
+                  <CodiceFiscaleValue
+                    value={patient.codiceFiscale}
+                    generatedFromImport={Boolean(patient.codiceFiscaleGenerato)}
+                  />
+                </span>
                 {calculateAge(patient.dataNascita) && (
                   <>
                     <span className="hidden md:inline text-gray-300">|</span>
-                    <span className="text-gray-500">{calculateAge(patient.dataNascita)}</span>
+                    <span className="text-gray-500">
+                      {calculateAge(patient.dataNascita)}
+                    </span>
                   </>
                 )}
               </p>
@@ -569,7 +665,8 @@ export default function AddVisit() {
               classNames={{
                 label: "text-gray-500 font-medium whitespace-nowrap pt-2",
                 input: "bg-transparent",
-                inputWrapper: "border-default-300 hover:border-primary focus-within:border-primary min-w-[140px]"
+                inputWrapper:
+                  "border-default-300 hover:border-primary focus-within:border-primary min-w-[140px]",
               }}
             />
           </div>
@@ -598,7 +695,9 @@ export default function AddVisit() {
               isDisabled={!canCopyOrClear}
               startContent={<Copy size={16} />}
             >
-              {copiedPreviousType === visitData.tipo ? "Svuota campi" : "Copia visita precedente"}
+              {copiedPreviousType === visitData.tipo
+                ? "Svuota campi"
+                : "Copia visita precedente"}
             </Button>
           </div>
         )}
@@ -614,7 +713,8 @@ export default function AddVisit() {
             tabList: "gap-8 w-full relative rounded-none p-0",
             cursor: "w-full bg-primary h-[3px]",
             tab: "max-w-fit px-2 h-12 text-lg",
-            tabContent: "group-data-[selected=true]:text-primary group-data-[selected=true]:font-bold text-gray-500 font-medium"
+            tabContent:
+              "group-data-[selected=true]:text-primary group-data-[selected=true]:font-bold text-gray-500 font-medium",
           }}
         >
           <Tab key="bilancio_salute" title="Bilancio di Salute" />
@@ -624,12 +724,13 @@ export default function AddVisit() {
 
         {/* Form Unificato per tutte le visite pediatriche */}
         <div className="flex flex-col lg:flex-row gap-6 mt-6">
-
           {/* LEFT COLUMN: Parametri e Nutrizione */}
           <div className="w-full lg:w-[32%] min-w-[300px] space-y-6">
             <Card className="shadow-sm border border-default-200 bg-white">
               <CardHeader className="pb-0 pt-4 px-4 font-semibold text-gray-700 uppercase text-xs tracking-wider">
-                {visitData.tipo === "bilancio_salute" ? "Parametri Auxologici & Vitali" : "Parametri Vitali"}
+                {visitData.tipo === "bilancio_salute"
+                  ? "Parametri Auxologici & Vitali"
+                  : "Parametri Vitali"}
               </CardHeader>
               <CardBody className="px-4 py-4 space-y-4">
                 <div className="grid grid-cols-2 gap-3">
@@ -637,19 +738,25 @@ export default function AddVisit() {
                     type="number"
                     label="Peso (kg)"
                     value={pediatriaData.peso?.toString() || ""}
-                    onValueChange={(v) => handlePediatriaChange("peso", parseFloat(v) || undefined)}
+                    onValueChange={(v) =>
+                      handlePediatriaChange("peso", parseFloat(v) || undefined)
+                    }
                     variant="bordered"
                     size="sm"
                     labelPlacement="outside"
                     step="0.01"
-                    className={visitData.tipo !== "bilancio_salute" ? "col-span-2" : ""}
+                    className={
+                      visitData.tipo !== "bilancio_salute" ? "col-span-2" : ""
+                    }
                   />
                   {visitData.tipo === "bilancio_salute" && (
                     <Input
                       type="text"
                       label="Percentile Peso"
                       value={pediatriaData.percentilePeso}
-                      onValueChange={(v) => handlePediatriaChange("percentilePeso", v)}
+                      onValueChange={(v) =>
+                        handlePediatriaChange("percentilePeso", v)
+                      }
                       variant="bordered"
                       size="sm"
                       labelPlacement="outside"
@@ -662,19 +769,28 @@ export default function AddVisit() {
                     type="number"
                     label="Altezza (cm)"
                     value={pediatriaData.altezza?.toString() || ""}
-                    onValueChange={(v) => handlePediatriaChange("altezza", parseFloat(v) || undefined)}
+                    onValueChange={(v) =>
+                      handlePediatriaChange(
+                        "altezza",
+                        parseFloat(v) || undefined,
+                      )
+                    }
                     variant="bordered"
                     size="sm"
                     labelPlacement="outside"
                     step="0.1"
-                    className={visitData.tipo !== "bilancio_salute" ? "col-span-2" : ""}
+                    className={
+                      visitData.tipo !== "bilancio_salute" ? "col-span-2" : ""
+                    }
                   />
                   {visitData.tipo === "bilancio_salute" && (
                     <Input
                       type="text"
                       label="Percentile Altezza"
                       value={pediatriaData.percentileAltezza}
-                      onValueChange={(v) => handlePediatriaChange("percentileAltezza", v)}
+                      onValueChange={(v) =>
+                        handlePediatriaChange("percentileAltezza", v)
+                      }
                       variant="bordered"
                       size="sm"
                       labelPlacement="outside"
@@ -686,8 +802,15 @@ export default function AddVisit() {
                     <Input
                       type="number"
                       label="Circonferenza Cranica (cm)"
-                      value={pediatriaData.circonferenzaCranica?.toString() || ""}
-                      onValueChange={(v) => handlePediatriaChange("circonferenzaCranica", parseFloat(v) || undefined)}
+                      value={
+                        pediatriaData.circonferenzaCranica?.toString() || ""
+                      }
+                      onValueChange={(v) =>
+                        handlePediatriaChange(
+                          "circonferenzaCranica",
+                          parseFloat(v) || undefined,
+                        )
+                      }
                       variant="bordered"
                       size="sm"
                       labelPlacement="outside"
@@ -697,7 +820,9 @@ export default function AddVisit() {
                       type="text"
                       label="Percentile CC"
                       value={pediatriaData.percentileCC}
-                      onValueChange={(v) => handlePediatriaChange("percentileCC", v)}
+                      onValueChange={(v) =>
+                        handlePediatriaChange("percentileCC", v)
+                      }
                       variant="bordered"
                       size="sm"
                       labelPlacement="outside"
@@ -710,7 +835,9 @@ export default function AddVisit() {
                     type="text"
                     label="Temperatura (°C)"
                     value={pediatriaData.temperatura}
-                    onValueChange={(v) => handlePediatriaChange("temperatura", v)}
+                    onValueChange={(v) =>
+                      handlePediatriaChange("temperatura", v)
+                    }
                     variant="bordered"
                     size="sm"
                     labelPlacement="outside"
@@ -720,7 +847,9 @@ export default function AddVisit() {
                     type="text"
                     label="SpO2 (%)"
                     value={pediatriaData.saturazioneO2}
-                    onValueChange={(v) => handlePediatriaChange("saturazioneO2", v)}
+                    onValueChange={(v) =>
+                      handlePediatriaChange("saturazioneO2", v)
+                    }
                     variant="bordered"
                     size="sm"
                     labelPlacement="outside"
@@ -731,7 +860,9 @@ export default function AddVisit() {
                   type="text"
                   label="Pressione Arteriosa"
                   value={pediatriaData.pressioneArteriosa}
-                  onValueChange={(v) => handlePediatriaChange("pressioneArteriosa", v)}
+                  onValueChange={(v) =>
+                    handlePediatriaChange("pressioneArteriosa", v)
+                  }
                   variant="bordered"
                   size="sm"
                   labelPlacement="outside"
@@ -749,12 +880,23 @@ export default function AddVisit() {
                   <Select
                     label="Tipo Allattamento"
                     labelPlacement="outside"
-                    selectedKeys={pediatriaData.allattamento ? [pediatriaData.allattamento] : []}
-                    onSelectionChange={(keys) => handlePediatriaChange("allattamento", String(Array.from(keys)[0] || ""))}
+                    selectedKeys={
+                      pediatriaData.allattamento
+                        ? [pediatriaData.allattamento]
+                        : []
+                    }
+                    onSelectionChange={(keys) =>
+                      handlePediatriaChange(
+                        "allattamento",
+                        String(Array.from(keys)[0] || ""),
+                      )
+                    }
                     variant="bordered"
                     size="sm"
                   >
-                    <SelectItem key="Materno Esclusivo">Materno Esclusivo</SelectItem>
+                    <SelectItem key="Materno Esclusivo">
+                      Materno Esclusivo
+                    </SelectItem>
                     <SelectItem key="Misto">Misto</SelectItem>
                     <SelectItem key="Formula">Formula</SelectItem>
                     <SelectItem key="Non allattato">Non allattato</SelectItem>
@@ -764,7 +906,9 @@ export default function AddVisit() {
                     type="text"
                     label="Svezzamento"
                     value={pediatriaData.svezzamento}
-                    onValueChange={(v) => handlePediatriaChange("svezzamento", v)}
+                    onValueChange={(v) =>
+                      handlePediatriaChange("svezzamento", v)
+                    }
                     variant="bordered"
                     size="sm"
                     labelPlacement="outside"
@@ -774,7 +918,9 @@ export default function AddVisit() {
                   <Textarea
                     label="Tappe Sviluppo"
                     value={pediatriaData.tappeSviluppo}
-                    onValueChange={(v) => handlePediatriaChange("tappeSviluppo", v)}
+                    onValueChange={(v) =>
+                      handlePediatriaChange("tappeSviluppo", v)
+                    }
                     variant="bordered"
                     labelPlacement="outside"
                     minRows={2}
@@ -783,7 +929,9 @@ export default function AddVisit() {
                   <Textarea
                     label="Stato Vaccinale"
                     value={pediatriaData.vaccinazioni}
-                    onValueChange={(v) => handlePediatriaChange("vaccinazioni", v)}
+                    onValueChange={(v) =>
+                      handlePediatriaChange("vaccinazioni", v)
+                    }
                     variant="bordered"
                     labelPlacement="outside"
                     minRows={2}
@@ -822,7 +970,10 @@ export default function AddVisit() {
                 {(pediatriaData.immagini ?? []).length > 0 && (
                   <div className="grid grid-cols-2 gap-3">
                     {(pediatriaData.immagini ?? []).map((image, idx) => (
-                      <div key={`ped-eco-${idx}`} className="relative group border rounded-lg overflow-hidden bg-gray-50">
+                      <div
+                        key={`ped-eco-${idx}`}
+                        className="relative group border rounded-lg overflow-hidden bg-gray-50"
+                      >
                         <img
                           src={image}
                           alt={`Immagine ${idx + 1}`}
@@ -856,35 +1007,49 @@ export default function AddVisit() {
                 {/* 1. Anamnesi */}
                 <div className="space-y-2 relative group">
                   <div className="flex justify-between items-end mb-1">
-                    <label className="text-sm font-bold text-gray-700">1. Anamnesi</label>
+                    <label className="text-sm font-bold text-gray-700">
+                      1. Anamnesi
+                    </label>
                     <TemplateSelector
-                      templates={allTemplates.filter(t => (t.category === visitData.tipo || t.category === 'bilancio_salute') && t.section === 'anamnesi')}
-                      onSelect={(t) => handleTemplateSelect('anamnesi', t)}
+                      templates={allTemplates.filter(
+                        (t) =>
+                          t.category === visitData.tipo &&
+                          t.section === "anamnesi",
+                      )}
+                      onSelect={(t) => handleTemplateSelect("anamnesi", t)}
                     />
                   </div>
                   <Textarea
                     value={visitData.anamnesi}
-                    onValueChange={(value) => handleInputChange("anamnesi", value)}
+                    onValueChange={(value) =>
+                      handleInputChange("anamnesi", value)
+                    }
                     variant="bordered"
                     minRows={3}
                     classNames={{
                       input: "text-base leading-relaxed",
-                      inputWrapper: "group-hover:border-primary transition-colors bg-white"
+                      inputWrapper:
+                        "group-hover:border-primary transition-colors bg-white",
                     }}
                   />
                 </div>
 
                 {/* 2. Descrizione Problema / Dati Clinici */}
                 <div className="space-y-2 group">
-                  <label className="text-sm font-bold text-gray-700 block mb-1">2. Descrizione Problema / Dati Clinici</label>
+                  <label className="text-sm font-bold text-gray-700 block mb-1">
+                    2. Descrizione Problema / Dati Clinici
+                  </label>
                   <Textarea
                     value={visitData.descrizioneClinica}
-                    onValueChange={(value) => handleInputChange("descrizioneClinica", value)}
+                    onValueChange={(value) =>
+                      handleInputChange("descrizioneClinica", value)
+                    }
                     variant="bordered"
                     minRows={3}
                     classNames={{
                       input: "text-base leading-relaxed",
-                      inputWrapper: "group-hover:border-primary transition-colors bg-white"
+                      inputWrapper:
+                        "group-hover:border-primary transition-colors bg-white",
                     }}
                   />
                 </div>
@@ -892,20 +1057,31 @@ export default function AddVisit() {
                 {/* 3. Visita */}
                 <div className="space-y-2 relative group">
                   <div className="flex justify-between items-end mb-1">
-                    <label className="text-sm font-bold text-gray-700">3. Visita</label>
+                    <label className="text-sm font-bold text-gray-700">
+                      3. Visita
+                    </label>
                     <TemplateSelector
-                      templates={allTemplates.filter(t => (t.category === visitData.tipo || t.category === 'bilancio_salute') && t.section === 'esameObiettivo')}
-                      onSelect={(t) => handleTemplateSelect('esamiObiettivo', t)}
+                      templates={allTemplates.filter(
+                        (t) =>
+                          t.category === visitData.tipo &&
+                          t.section === "esameObiettivo",
+                      )}
+                      onSelect={(t) =>
+                        handleTemplateSelect("esamiObiettivo", t)
+                      }
                     />
                   </div>
                   <Textarea
                     value={visitData.esamiObiettivo}
-                    onValueChange={(value) => handleInputChange("esamiObiettivo", value)}
+                    onValueChange={(value) =>
+                      handleInputChange("esamiObiettivo", value)
+                    }
                     variant="bordered"
                     minRows={4}
                     classNames={{
                       input: "text-base leading-relaxed",
-                      inputWrapper: "group-hover:border-primary transition-colors bg-white"
+                      inputWrapper:
+                        "group-hover:border-primary transition-colors bg-white",
                     }}
                   />
                 </div>
@@ -913,29 +1089,38 @@ export default function AddVisit() {
                 {/* 4. Conclusioni e Terapie */}
                 <div className="space-y-2 relative group">
                   <div className="flex justify-between items-end mb-1">
-                    <label className="text-sm font-bold text-gray-700">4. Conclusioni e Terapie</label>
+                    <label className="text-sm font-bold text-gray-700">
+                      4. Conclusioni e Terapie
+                    </label>
                     <TemplateSelector
-                      templates={allTemplates.filter(t => t.section === 'conclusioni' || t.category === 'terapie')}
-                      onSelect={(t) => handleTemplateSelect('conclusioniDiagnostiche', t)}
+                      templates={allTemplates.filter(
+                        (t) =>
+                          t.category === visitData.tipo &&
+                          t.section === "conclusioni",
+                      )}
+                      onSelect={(t) =>
+                        handleTemplateSelect("conclusioniDiagnostiche", t)
+                      }
                     />
                   </div>
                   <Textarea
                     value={visitData.conclusioniDiagnostiche}
-                    onValueChange={(value) => handleInputChange("conclusioniDiagnostiche", value)}
+                    onValueChange={(value) =>
+                      handleInputChange("conclusioniDiagnostiche", value)
+                    }
                     variant="bordered"
                     minRows={4}
                     classNames={{
                       input: "text-base leading-relaxed",
-                      inputWrapper: "group-hover:border-primary transition-colors bg-white"
+                      inputWrapper:
+                        "group-hover:border-primary transition-colors bg-white",
                     }}
                   />
                 </div>
-
               </CardBody>
             </Card>
           </div>
         </div>
-
       </form>
 
       {/* Floating Action Bar */}
@@ -981,7 +1166,10 @@ export default function AddVisit() {
       </div>
 
       {fullscreenImage && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-6" onClick={() => setFullscreenImage(null)}>
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center p-6"
+          onClick={() => setFullscreenImage(null)}
+        >
           <div className="relative" onClick={(e) => e.stopPropagation()}>
             <button
               type="button"
@@ -990,22 +1178,35 @@ export default function AddVisit() {
             >
               <X size={18} />
             </button>
-            <img src={fullscreenImage} alt="Ingrandimento" className="max-w-[92vw] max-h-[92vh] object-contain rounded-2xl border border-gray-200 bg-white p-1 shadow-2xl" />
+            <img
+              src={fullscreenImage}
+              alt="Ingrandimento"
+              className="max-w-[92vw] max-h-[92vh] object-contain rounded-2xl border border-gray-200 bg-white p-1 shadow-2xl"
+            />
           </div>
         </div>
       )}
 
-      <Modal isOpen={isIncludeImagesModalOpen} onClose={() => resolveIncludeImages(false)}>
+      <Modal
+        isOpen={isIncludeImagesModalOpen}
+        onClose={() => resolveIncludeImages(false)}
+      >
         <ModalContent>
           <ModalHeader>Includere immagini?</ModalHeader>
           <ModalBody>
             <p className="text-sm text-gray-600">
-              Sono presenti <span className="font-semibold">{includeImagesCount}</span> immagini nella visita. Vuoi inserirle nel PDF di stampa?
+              Sono presenti{" "}
+              <span className="font-semibold">{includeImagesCount}</span>{" "}
+              immagini nella visita. Vuoi inserirle nel PDF di stampa?
             </p>
           </ModalBody>
           <ModalFooter>
-            <Button variant="light" onPress={() => resolveIncludeImages(false)}>No</Button>
-            <Button color="primary" onPress={() => resolveIncludeImages(true)}>Si, includi</Button>
+            <Button variant="light" onPress={() => resolveIncludeImages(false)}>
+              No
+            </Button>
+            <Button color="primary" onPress={() => resolveIncludeImages(true)}>
+              Si, includi
+            </Button>
           </ModalFooter>
         </ModalContent>
       </Modal>
