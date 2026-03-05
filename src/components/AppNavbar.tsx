@@ -176,6 +176,8 @@ export default function AppNavbar() {
           },
         });
 
+        console.log("access", access.data);
+
         if (!access.data.allowed || !access.data.shouldUpdate) {
           setUpdateAvailable(null);
           setUpdateDownloaded(false);
@@ -206,6 +208,8 @@ export default function AppNavbar() {
     ).electronAPI;
     api?.updaterQuitAndInstall?.();
   };
+
+  console.log("updateAvailable", updateAvailable);
 
   return (
     <Navbar
@@ -271,7 +275,7 @@ export default function AppNavbar() {
           </Tooltip>
         </NavbarItem>
 
-        {(updateAvailable || updateDownloaded) && (
+        {updateAvailable && (
           <NavbarItem className="hidden md:flex">
             {updateDownloaded ? (
               <Tooltip content="Installa l'aggiornamento e riavvia">

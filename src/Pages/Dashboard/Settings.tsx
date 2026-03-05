@@ -52,6 +52,7 @@ import {
 } from "../../services/OfflineServices";
 import { MedicalTemplate } from "../../types/Storage";
 import { getMissingDoctorProfileFields } from "../../utils/doctorProfile";
+import axios from "axios";
 
 const SettingsScreen = () => {
   // ... state declarations ...
@@ -155,6 +156,7 @@ const SettingsScreen = () => {
   const [updateAvailable, setUpdateAvailable] = useState<string | null>(null);
   const [updateDownloaded, setUpdateDownloaded] = useState(false);
   const [updateError, setUpdateError] = useState<string | null>(null);
+  const [updateBoxVisible, setUpdateBoxVisible] = useState(false);
 
   const [cropImageOpen, setCropImageOpen] = useState(false);
   const [cropImageDataUrl, setCropImageDataUrl] = useState("");
@@ -257,6 +259,37 @@ const SettingsScreen = () => {
     loadCounts();
   }, []);
 
+  const checkUpdateAccess = async (): Promise<boolean> => {
+    try {
+      const doctor = await DoctorService.getDoctor();
+      const clientId = doctor?.id?.trim();
+      if (!clientId) return false;
+
+      const api = (
+        window as unknown as {
+          electronAPI?: { getAppVersion?: () => Promise<string> };
+        }
+      ).electronAPI;
+      const currentVersion =
+        (await api?.getAppVersion?.()) || appVersion || "0.0.0";
+
+      const access = await axios.get<{ allowed: boolean; shouldUpdate: boolean }>(
+        `${import.meta.env.VITE_API_URL}/updates/check-access`,
+        {
+          params: {
+            app: "corioli-pediatria",
+            clientId,
+            currentVersion,
+          },
+        },
+      );
+
+      return Boolean(access.data?.allowed);
+    } catch {
+      return false;
+    }
+  };
+
   useEffect(() => {
     const api = (
       window as unknown as {
@@ -282,6 +315,16 @@ const SettingsScreen = () => {
     ).electronAPI;
     if (!api?.getAppVersion) return;
     api.getAppVersion().then((v) => setAppVersion(v || ""));
+
+    void checkUpdateAccess().then((allowed) => {
+      setUpdateBoxVisible(allowed);
+      if (!allowed) {
+        setUpdateAvailable(null);
+        setUpdateDownloaded(false);
+        setUpdateError(null);
+      }
+    });
+
     api.onUpdaterChecking?.(() => {
       setUpdateError(null);
       setUpdateChecking(true);
@@ -325,6 +368,11 @@ const SettingsScreen = () => {
       }
     ).electronAPI;
     if (!api?.updaterCheck) return;
+
+    const allowed = await checkUpdateAccess();
+    setUpdateBoxVisible(allowed);
+    if (!allowed) return;
+
     setUpdateError(null);
     setUpdateAvailable(null);
     setUpdateDownloaded(false);
@@ -1228,7 +1276,8 @@ const SettingsScreen = () => {
       )}
 
       {typeof (window as unknown as { electronAPI?: unknown }).electronAPI !==
-        "undefined" && (
+        "undefined" &&
+        updateBoxVisible && (
         <Card className="shadow-sm border border-default-200">
           <CardBody className="py-2 px-4">
             <div className="flex items-center justify-between w-full gap-3">
@@ -1278,7 +1327,7 @@ const SettingsScreen = () => {
                   </Chip>
                 )}
                 <a
-                  href="https://github.com/SpaceDesignItalia/Corioli/releases"
+                  href="https://github.com/SpaceDesignItalia/Corioli-Pediatria/releases"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-xs text-primary underline"
