@@ -17,7 +17,7 @@ import { AcmeIcon } from "./sidebar/AcmeIcon";
 import { DoctorService } from "../services/OfflineServices";
 import { Download, MapPin, RefreshCw } from "lucide-react";
 import { storageService } from "../services/StorageServiceFallback";
-import { Doctor } from "../types/Storage";
+import { sendHeartbeat } from "../services/HeartbeatService";
 import axios from "axios";
 
 const menuItems = [
@@ -54,7 +54,7 @@ export default function AppNavbar() {
   };
 
   const BLOCKED_STORAGE_KEY = "blocked_users";
-  const ONE_HOUR_MS = 1000; // 5 minutes
+  const ONE_HOUR_MS = 60 * 1000; // 1 minute
 
   useEffect(() => {
     loadDoctor();
@@ -83,7 +83,11 @@ export default function AppNavbar() {
         }
 
         if (doctor) {
-          const { blocked, reason } = await sendOnlineStatus(doctor);
+          const { blocked, reason } = await sendHeartbeat(
+            doctor,
+            "corioli-pediatria",
+          );
+          if (blocked === null) return;
           const payload = {
             blocked: blocked,
             reason: reason,
@@ -94,7 +98,7 @@ export default function AppNavbar() {
             JSON.stringify(payload),
           );
 
-          if (blocked) navigate("/blocked");
+          if (blocked === true) navigate("/blocked");
         }
       } catch (e) {
         console.error("checkFeature blocked_users:", e);
@@ -102,33 +106,6 @@ export default function AppNavbar() {
     };
     void checkFeature();
   }, [navigate]);
-
-  const sendOnlineStatus = async (
-    doctor: Doctor,
-  ): Promise<{ blocked: boolean; reason: string | null }> => {
-    try {
-      const result = await axios.post(
-        `${import.meta.env.VITE_API_URL}/clients/heartbeat`,
-        {
-          id: doctor.id,
-          nome: doctor.nome,
-          cognome: doctor.cognome,
-          email: doctor.email,
-          numero_telefono: doctor.telefono,
-          specializzazione: doctor.specializzazione,
-          tipo: "pediatria",
-        },
-      );
-      return {
-        blocked: Boolean(result.data.blocked),
-        reason:
-          typeof result.data.reason === "string" ? result.data.reason : null,
-      };
-    } catch (e) {
-      console.error("sendOnlineStatus:", e);
-      return { blocked: true, reason: null };
-    }
-  };
 
   useEffect(() => {
     const onDoctorUpdated = () => loadDoctor();
@@ -176,15 +153,45 @@ export default function AppNavbar() {
       setUpdateAvailable(null);
     });
 
-    // Controllo automatico all'apertura dell'app.
-    api
-      .updaterCheck?.()
-      .then((result) => {
-        if (result?.version) setUpdateAvailable(result.version);
-      })
-      .catch(() => {
+    const checkUpdateIfAllowed = async () => {
+      try {
+        const doctor = await DoctorService.getDoctor();
+        const clientId = doctor?.id?.trim();
+        if (!clientId) return;
+
+        const appVersion = await ((
+          window as unknown as {
+            electronAPI?: { getAppVersion?: () => Promise<string> };
+          }
+        ).electronAPI?.getAppVersion?.() ?? Promise.resolve("0.0.0"));
+
+        const access = await axios.get<{
+          shouldUpdate: boolean;
+          allowed: boolean;
+        }>(`${import.meta.env.VITE_API_URL}/updates/check-access`, {
+          params: {
+            app: "corioli-pediatria",
+            clientId,
+            currentVersion: appVersion,
+          },
+        });
+
+        if (!access.data.allowed || !access.data.shouldUpdate) {
+          setUpdateAvailable(null);
+          setUpdateDownloaded(false);
+          return;
+        }
+
+        const result = await api.updaterCheck?.();
+        if (result?.version) {
+          setUpdateAvailable(result.version);
+        }
+      } catch {
         // ignore
-      });
+      }
+    };
+
+    void checkUpdateIfAllowed();
   }, []);
 
   const handleReloadApp = () => {
