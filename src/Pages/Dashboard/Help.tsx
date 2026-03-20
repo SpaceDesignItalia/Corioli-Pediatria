@@ -74,11 +74,11 @@ export default function HelpAndFeedback() {
       items: [
         {
           title: "Come creo una nuova visita?",
-          content: "Dalla scheda del paziente, clicca su '+ Nuova Visita'. Puoi scegliere tra visita 'Bilancio di Salute', 'Patologia', 'Controllo' o 'Urgenza' usando le schede in alto. I campi e i modelli disponibili cambieranno in base al tipo selezionato."
+          content: "Dalla scheda del paziente, clicca su '+ Nuova Visita'. Puoi scegliere tra visita 'Visita pediatrica', 'Controllo' o 'Urgenza' usando le schede in alto. I campi e i modelli disponibili cambieranno in base al tipo selezionato."
         },
         {
           title: "Come funziona il calcolo dei percentili?",
-          content: "Nella visita (es. Bilancio di Salute) nella sezione Auxologica, puoi inserire i campi Peso, Altezza e Circonferenza Cranica, seguiti dai relativi percentili o punteggi Z. Questi dati vengono poi riportati automaticamente sia nello storico che nel referto PDF PDF."
+          content: "Nella visita (es. Visita pediatrica) nella sezione Auxologica, puoi inserire i campi Peso, Altezza e Circonferenza Cranica, seguiti dai relativi percentili o punteggi Z. Questi dati vengono poi riportati automaticamente sia nello storico che nel referto PDF."
         },
         {
           title: "Come uso i modelli (template) nei referti?",

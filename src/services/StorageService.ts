@@ -1,8 +1,8 @@
-import { StorageService, Patient, Visit, Doctor, AppData, BackupImportMode, RichiestaEsameComplementare } from '../types/Storage';
+import { StorageService, Patient, Visit, Doctor, AppData, BackupImportMode, RichiestaEsameComplementare, CertificatoPaziente } from '../types/Storage';
 
 class LocalStorageService implements StorageService {
   private dbName = 'AppDottoriDB';
-  private version = 2;
+  private version = 3;
   private db: IDBDatabase | null = null;
 
   private async initDB(): Promise<IDBDatabase> {
@@ -49,6 +49,12 @@ class LocalStorageService implements StorageService {
         if (!db.objectStoreNames.contains('richieste_esami')) {
           const reStore = db.createObjectStore('richieste_esami', { keyPath: 'id' });
           reStore.createIndex('patientId', 'patientId');
+        }
+
+        // Store per certificati paziente
+        if (!db.objectStoreNames.contains('certificati')) {
+          const cStore = db.createObjectStore('certificati', { keyPath: 'id' });
+          cStore.createIndex('patientId', 'patientId');
         }
       };
     });
@@ -186,6 +192,11 @@ class LocalStorageService implements StorageService {
       await this.deleteRichiestaEsame(r.id);
     }
 
+    const certificati = await this.getCertificatiByPatientId(id);
+    for (const c of certificati) {
+      await this.deleteCertificato(c.id);
+    }
+
     return new Promise((resolve, reject) => {
       const transaction = db.transaction(['patients'], 'readwrite');
       const store = transaction.objectStore('patients');
@@ -268,6 +279,86 @@ class LocalStorageService implements StorageService {
     return new Promise((resolve, reject) => {
       const transaction = db.transaction(['richieste_esami'], 'readwrite');
       const store = transaction.objectStore('richieste_esami');
+      const request = store.delete(id);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  // Certificati paziente
+  async getCertificatiByPatientId(
+    patientId: string,
+  ): Promise<CertificatoPaziente[]> {
+    const db = await this.initDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(['certificati'], 'readonly');
+      const store = transaction.objectStore('certificati');
+      const index = store.index('patientId');
+      const request = index.getAll(patientId);
+      request.onsuccess = () => resolve(request.result || []);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async getCertificatoById(
+    id: string,
+  ): Promise<CertificatoPaziente | null> {
+    const db = await this.initDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(['certificati'], 'readonly');
+      const store = transaction.objectStore('certificati');
+      const request = store.get(id);
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async addCertificato(
+    cert: Omit<CertificatoPaziente, 'id' | 'createdAt' | 'updatedAt'>,
+  ): Promise<CertificatoPaziente> {
+    const db = await this.initDB();
+    const newCert: CertificatoPaziente = {
+      ...cert,
+      id: this.generateId(),
+      createdAt: this.getCurrentTimestamp(),
+      updatedAt: this.getCurrentTimestamp(),
+    };
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(['certificati'], 'readwrite');
+      const store = transaction.objectStore('certificati');
+      const request = store.add(newCert);
+      request.onsuccess = () => resolve(newCert);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async updateCertificato(
+    id: string,
+    data: Partial<CertificatoPaziente>,
+  ): Promise<CertificatoPaziente> {
+    const existing = await this.getCertificatoById(id);
+    if (!existing) throw new Error('Certificato non trovato');
+    const updated: CertificatoPaziente = {
+      ...existing,
+      ...data,
+      id,
+      updatedAt: this.getCurrentTimestamp(),
+    };
+    const db = await this.initDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(['certificati'], 'readwrite');
+      const store = transaction.objectStore('certificati');
+      const request = store.put(updated);
+      request.onsuccess = () => resolve(updated);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async deleteCertificato(id: string): Promise<void> {
+    const db = await this.initDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(['certificati'], 'readwrite');
+      const store = transaction.objectStore('certificati');
       const request = store.delete(id);
       request.onsuccess = () => resolve();
       request.onerror = () => reject(request.error);
@@ -420,6 +511,11 @@ class LocalStorageService implements StorageService {
       this.getDoctor()
     ]);
 
+    const certificatiPerPatient = await Promise.all(
+      patients.map((p) => this.getCertificatiByPatientId(p.id)),
+    );
+    const certificati = certificatiPerPatient.flat();
+
     return {
       patients,
       visits,
@@ -433,6 +529,7 @@ class LocalStorageService implements StorageService {
         createdAt: this.getCurrentTimestamp(),
         updatedAt: this.getCurrentTimestamp()
       },
+      certificati,
       lastSync: this.getCurrentTimestamp()
     };
   }
@@ -459,6 +556,12 @@ class LocalStorageService implements StorageService {
         const store = transaction.objectStore('doctor');
         store.add(data.doctor);
       }
+
+      if (data.certificati && data.certificati.length > 0) {
+        const transaction = db.transaction(['certificati'], 'readwrite');
+        const store = transaction.objectStore('certificati');
+        for (const cert of data.certificati) store.add(cert);
+      }
       return;
     }
 
@@ -475,10 +578,17 @@ class LocalStorageService implements StorageService {
     );
 
     const db = await this.initDB();
-    const tx = db.transaction(['patients', 'visits', 'doctor'], 'readwrite');
+    const existingCertificatiPerPatient = await Promise.all(
+      existingPatients.map((p) => this.getCertificatiByPatientId(p.id)),
+    );
+    const existingCertificati = existingCertificatiPerPatient.flat();
+    const certIds = new Set(existingCertificati.map((c) => c.id));
+
+    const tx = db.transaction(['patients', 'visits', 'doctor', 'certificati'], 'readwrite');
     const patientStore = tx.objectStore('patients');
     const visitStore = tx.objectStore('visits');
     const doctorStore = tx.objectStore('doctor');
+    const certStore = tx.objectStore('certificati');
 
     for (const p of data.patients || []) {
       const cf = String(p.codiceFiscale || '').toUpperCase();
@@ -541,16 +651,24 @@ class LocalStorageService implements StorageService {
         doctorStore.put(mergedDoctor);
       }
     }
+
+    for (const cert of data.certificati || []) {
+      if (certIds.has(cert.id)) continue;
+      certStore.put(cert);
+      certIds.add(cert.id);
+    }
   }
 
   async clearAllData(): Promise<void> {
     const db = await this.initDB();
     
-    const transaction = db.transaction(['patients', 'visits', 'doctor'], 'readwrite');
+    const transaction = db.transaction(['patients', 'visits', 'doctor', 'richieste_esami', 'certificati'], 'readwrite');
     
     transaction.objectStore('patients').clear();
     transaction.objectStore('visits').clear();
     transaction.objectStore('doctor').clear();
+    transaction.objectStore('richieste_esami').clear();
+    transaction.objectStore('certificati').clear();
   }
 }
 

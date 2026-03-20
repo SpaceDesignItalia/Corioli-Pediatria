@@ -1,4 +1,4 @@
-import { StorageService, Patient, Visit, Doctor, Document, AppData, MedicalTemplate, BackupImportMode, RichiestaEsameComplementare } from '../types/Storage';
+import { StorageService, Patient, Visit, Doctor, Document, AppData, MedicalTemplate, BackupImportMode, RichiestaEsameComplementare, CertificatoPaziente } from '../types/Storage';
 import { MedicalTemplates } from '../data/medicalTemplates';
 
 declare global {
@@ -163,12 +163,16 @@ class LocalStorageFallbackService implements StorageService {
     const patients = await this.getPatients();
     const visits = await this.getVisits();
     const richiesteEsami = await this.getFromStorage<RichiestaEsameComplementare>('richieste_esami');
+    const certificati = await this.getFromStorage<CertificatoPaziente>('certificati');
 
     const filteredVisits = visits.filter(v => v.patientId !== id);
     await this.saveToStorage('visits', filteredVisits);
 
     const filteredRichieste = richiesteEsami.filter(r => r.patientId !== id);
     await this.saveToStorage('richieste_esami', filteredRichieste);
+
+    const filteredCertificati = certificati.filter(c => c.patientId !== id);
+    await this.saveToStorage('certificati', filteredCertificati);
 
     const filteredPatients = patients.filter(p => p.id !== id);
     await this.saveToStorage('patients', filteredPatients);
@@ -216,6 +220,55 @@ class LocalStorageFallbackService implements StorageService {
     const list = await this.getFromStorage<RichiestaEsameComplementare>('richieste_esami');
     const filtered = list.filter(r => r.id !== id);
     await this.saveToStorage('richieste_esami', filtered);
+  }
+
+  // Certificati paziente
+  async getCertificatiByPatientId(patientId: string): Promise<CertificatoPaziente[]> {
+    const list = await this.getFromStorage<CertificatoPaziente>('certificati');
+    return list.filter(c => c.patientId === patientId);
+  }
+
+  async getCertificatoById(id: string): Promise<CertificatoPaziente | null> {
+    const list = await this.getFromStorage<CertificatoPaziente>('certificati');
+    return list.find(c => c.id === id) || null;
+  }
+
+  async addCertificato(
+    cert: Omit<CertificatoPaziente, 'id' | 'createdAt' | 'updatedAt'>,
+  ): Promise<CertificatoPaziente> {
+    const list = await this.getFromStorage<CertificatoPaziente>('certificati');
+    const newCert: CertificatoPaziente = {
+      ...cert,
+      id: this.generateId(),
+      createdAt: this.getCurrentTimestamp(),
+      updatedAt: this.getCurrentTimestamp(),
+    };
+    list.push(newCert);
+    await this.saveToStorage('certificati', list);
+    return newCert;
+  }
+
+  async updateCertificato(
+    id: string,
+    data: Partial<CertificatoPaziente>,
+  ): Promise<CertificatoPaziente> {
+    const list = await this.getFromStorage<CertificatoPaziente>('certificati');
+    const index = list.findIndex(c => c.id === id);
+    if (index === -1) throw new Error('Certificato non trovato');
+    list[index] = {
+      ...list[index],
+      ...data,
+      id,
+      updatedAt: this.getCurrentTimestamp(),
+    };
+    await this.saveToStorage('certificati', list);
+    return list[index];
+  }
+
+  async deleteCertificato(id: string): Promise<void> {
+    const list = await this.getFromStorage<CertificatoPaziente>('certificati');
+    const filtered = list.filter(c => c.id !== id);
+    await this.saveToStorage('certificati', filtered);
   }
 
   // Visite
@@ -409,6 +462,19 @@ class LocalStorageFallbackService implements StorageService {
       // Esami complementari
       MedicalTemplates.esami_complementari.forEach(t => defaultTemplates.push({ id: generateId(), category: 'esame_complementare', section: 'nome', label: t.label, text: t.text, note: t.note, isDefault: true }));
 
+      // Certificati
+      if (Array.isArray((MedicalTemplates as any).certificato)) {
+        (MedicalTemplates as any).certificato.forEach((t: any) => defaultTemplates.push({
+          id: generateId(),
+          category: 'certificato',
+          section: 'generale',
+          label: t.label,
+          text: t.text,
+          note: t.note,
+          isDefault: true
+        }));
+      }
+
       // Keep user's custom templates that aren't obsolete
       const customTemplates = templates.filter(t => !t.isDefault && (t.category as string) !== 'ginecologia' && (t.category as string) !== 'ostetricia');
       const updated = [...customTemplates, ...defaultTemplates];
@@ -428,6 +494,22 @@ class LocalStorageFallbackService implements StorageService {
         isDefault: true,
       }));
       const updated = [...templates, ...examDefaults];
+      await this.saveToStorage('templates', updated);
+      return updated;
+    }
+
+    // Seed certificates for existing users (in case they were added after the first initialization)
+    if (!templates.some(t => t.category === 'certificato')) {
+      const certDefaults: MedicalTemplate[] = ((MedicalTemplates as any).certificato ?? []).map((t: any) => ({
+        id: generateId(),
+        category: 'certificato' as const,
+        section: 'generale' as const,
+        label: t.label,
+        text: t.text,
+        note: t.note,
+        isDefault: true,
+      }));
+      const updated = [...templates, ...certDefaults];
       await this.saveToStorage('templates', updated);
       return updated;
     }

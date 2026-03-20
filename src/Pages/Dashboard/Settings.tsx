@@ -26,6 +26,7 @@ import {
   ModalFooter,
   useDisclosure,
   Progress,
+  Switch,
 } from "@nextui-org/react";
 import {
   User,
@@ -118,6 +119,7 @@ const SettingsScreen = () => {
     formulaPesoFetale: "hadlock4", // hadlock4, shepard, hadlock3
     showDoctorPhoneInPdf: true,
     showDoctorEmailInPdf: true,
+    pediatriaAnamnesiSplit: false,
   });
   const [duplicateGroups, setDuplicateGroups] = useState<
     Array<{ key: string; patients: any[] }>
@@ -1680,6 +1682,97 @@ const SettingsScreen = () => {
             </CardBody>
           </Card>
         </div>
+
+        {/* Preferenze */}
+        <div className="w-full">
+          <Card className="shadow-lg h-full">
+            <CardHeader className="pb-2">
+              <div className="flex items-center gap-3">
+                <FileText className="w-5 h-5 text-primary" />
+                <h2 className="text-xl font-semibold text-gray-900">
+                  Preferenze
+                </h2>
+              </div>
+            </CardHeader>
+            <CardBody className="space-y-4">
+              <div className="rounded-lg border border-default-200 p-4 space-y-4 bg-default-50/60">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-medium text-gray-800">
+                      Anamnesi pediatrica in campi separati
+                    </p>
+                    <p className="text-xs text-default-500 mt-1">
+                      Attivo: 1. Fisiologica • 2. Patologica remota • 3.
+                      Prossima
+                    </p>
+                  </div>
+                  <Switch
+                    aria-label="Abilita anamnesi pediatrica in campi separati"
+                    isSelected={Boolean(preferences.pediatriaAnamnesiSplit)}
+                    onValueChange={(value) =>
+                      setPreferences((prev) => ({
+                        ...prev,
+                        pediatriaAnamnesiSplit: value,
+                      }))
+                    }
+                  />
+                </div>
+
+                <Divider />
+
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-medium text-gray-800">
+                      Mostra email nel PDF
+                    </p>
+                    <p className="text-xs text-default-500 mt-1">
+                      Determina la presenza dell&apos;email del medico nel footer
+                      del referto.
+                    </p>
+                  </div>
+                  <Switch
+                    aria-label="Mostra email nel PDF"
+                    isSelected={Boolean(preferences.showDoctorEmailInPdf)}
+                    onValueChange={(value) =>
+                      setPreferences((prev) => ({
+                        ...prev,
+                        showDoctorEmailInPdf: value,
+                      }))
+                    }
+                  />
+                </div>
+
+                <Divider />
+
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-medium text-gray-800">
+                      Mostra numero di telefono nel PDF
+                    </p>
+                    <p className="text-xs text-default-500 mt-1">
+                      Determina la presenza del numero di telefono del medico nel
+                      footer del referto.
+                    </p>
+                  </div>
+                  <Switch
+                    aria-label="Mostra numero di telefono nel PDF"
+                    isSelected={Boolean(preferences.showDoctorPhoneInPdf)}
+                    onValueChange={(value) =>
+                      setPreferences((prev) => ({
+                        ...prev,
+                        showDoctorPhoneInPdf: value,
+                      }))
+                    }
+                  />
+                </div>
+              </div>
+
+              <p className="text-xs text-default-500">
+                Le preferenze influenzano la generazione del PDF (referti).
+              </p>
+            </CardBody>
+          </Card>
+        </div>
       </div>
 
       {/* Sezione dedicata: Qualità Dati Pazienti */}
@@ -1906,7 +1999,7 @@ const SettingsScreen = () => {
             selectedKey={selectedCategory}
             onSelectionChange={(key) => setSelectedCategory(key as string)}
           >
-            <Tab key="bilancio_salute" title="Bilancio Salute" />
+            <Tab key="bilancio_salute" title="Visita pediatrica" />
             <Tab key="patologia" title="Patologia" />
             <Tab key="controllo" title="Controllo" />
             <Tab key="urgenza" title="Urgenza" />
@@ -2167,7 +2260,7 @@ const SettingsScreen = () => {
                     }
                   >
                     <SelectItem key="bilancio_salute" value="bilancio_salute">
-                      Bilancio Salute
+                      Visita pediatrica
                     </SelectItem>
                     <SelectItem key="patologia" value="patologia">
                       Patologia

@@ -137,7 +137,7 @@ export default function Visite() {
   };
 
   const getVisitTypeLabel = (tipo?: Visit["tipo"]) => {
-    if (tipo === "bilancio_salute") return "Bilancio di Salute";
+    if (tipo === "bilancio_salute") return "Visita pediatrica";
     if (tipo === "patologia") return "Patologia";
     if (tipo === "controllo") return "Controllo";
     if (tipo === "urgenza") return "Urgenza";
@@ -153,34 +153,6 @@ export default function Visite() {
   const formatMultiLine = (value?: string) => {
     if (!value || !value.trim()) return "Non compilato";
     return value;
-  };
-
-  const renderImages = (images?: string[]) => {
-    if (!images || images.length === 0) return null;
-    return (
-      <Card shadow="sm">
-        <CardBody className="space-y-3">
-          <p className="text-xs uppercase tracking-wide text-gray-500">Immagini allegate</p>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            {images.map((image, index) => (
-              <a
-                key={`immagine-${index}`}
-                href={image}
-                target="_blank"
-                rel="noreferrer"
-                className="block border border-gray-200 rounded-lg overflow-hidden hover:opacity-90 transition-opacity"
-              >
-                <img
-                  src={image}
-                  alt={`Immagine ${index + 1}`}
-                  className="w-full h-28 object-cover"
-                />
-              </a>
-            ))}
-          </div>
-        </CardBody>
-      </Card>
-    );
   };
 
   if (loading) {
@@ -233,8 +205,7 @@ export default function Visite() {
               variant="bordered"
             >
               <SelectItem key="tutti">Tutti</SelectItem>
-              <SelectItem key="bilancio_salute">Bilancio di Salute</SelectItem>
-              <SelectItem key="patologia">Patologia</SelectItem>
+              <SelectItem key="bilancio_salute">Visita pediatrica</SelectItem>
               <SelectItem key="controllo">Controllo</SelectItem>
               <SelectItem key="urgenza">Urgenza</SelectItem>
             </Select>
@@ -397,7 +368,7 @@ export default function Visite() {
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
                   <Card shadow="sm">
                     <CardBody className="space-y-2">
-                      <p className="text-xs uppercase tracking-wide text-gray-500">Descrizione clinica</p>
+                      <p className="text-xs uppercase tracking-wide text-gray-500">Patologica prossima</p>
                       <p className="text-sm whitespace-pre-wrap">{formatMultiLine(selectedVisit.descrizioneClinica)}</p>
                     </CardBody>
                   </Card>
@@ -438,19 +409,43 @@ export default function Visite() {
                       <CardBody className="space-y-3">
                         <p className="text-xs uppercase tracking-wide text-success-700">Dettagli pediatrici</p>
                         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 text-sm mt-2">
-                          {selectedVisit.pediatria.peso && <p><span className="font-medium text-gray-700">Peso:</span> <br />{selectedVisit.pediatria.peso} kg {selectedVisit.pediatria.percentilePeso ? `(${selectedVisit.pediatria.percentilePeso})` : ""}</p>}
-                          {selectedVisit.pediatria.altezza && <p><span className="font-medium text-gray-700">Altezza:</span> <br />{selectedVisit.pediatria.altezza} cm {selectedVisit.pediatria.percentileAltezza ? `(${selectedVisit.pediatria.percentileAltezza})` : ""}</p>}
-                          {selectedVisit.pediatria.circonferenzaCranica && <p><span className="font-medium text-gray-700">CC:</span> <br />{selectedVisit.pediatria.circonferenzaCranica} cm {selectedVisit.pediatria.percentileCC ? `(${selectedVisit.pediatria.percentileCC})` : ""}</p>}
+                          {selectedVisit.pediatria.peso && (
+                            <p>
+                              <span className="font-medium text-gray-700">Peso:</span>{" "}
+                              <br />
+                              {selectedVisit.pediatria.peso} kg{" "}
+                              {selectedVisit.pediatria.percentilePeso
+                                ? `(${String(selectedVisit.pediatria.percentilePeso).trim().replace(/°$/, "")}°)`
+                                : ""}
+                            </p>
+                          )}
+                          {selectedVisit.pediatria.altezza && (
+                            <p>
+                              <span className="font-medium text-gray-700">Altezza:</span>{" "}
+                              <br />
+                              {selectedVisit.pediatria.altezza} cm{" "}
+                              {selectedVisit.pediatria.percentileAltezza
+                                ? `(${String(selectedVisit.pediatria.percentileAltezza).trim().replace(/°$/, "")}°)`
+                                : ""}
+                            </p>
+                          )}
+                          {selectedVisit.pediatria.circonferenzaCranica && (
+                            <p>
+                              <span className="font-medium text-gray-700">CC:</span>{" "}
+                              <br />
+                              {selectedVisit.pediatria.circonferenzaCranica} cm{" "}
+                              {selectedVisit.pediatria.percentileCC
+                                ? `(${String(selectedVisit.pediatria.percentileCC).trim().replace(/°$/, "")}°)`
+                                : ""}
+                            </p>
+                          )}
                           {selectedVisit.pediatria.pressioneArteriosa && <p><span className="font-medium text-gray-700">Pressione Arteriosa:</span> <br />{selectedVisit.pediatria.pressioneArteriosa}</p>}
-
-                          {selectedVisit.pediatria.allattamento && <p><span className="font-medium text-gray-700">Allattamento:</span> <br />{selectedVisit.pediatria.allattamento}</p>}
-                          {selectedVisit.pediatria.svezzamento && <p><span className="font-medium text-gray-700">Svezzamento:</span> <br />{selectedVisit.pediatria.svezzamento}</p>}
-                          {selectedVisit.pediatria.vaccinazioni && <p><span className="font-medium text-gray-700">Vaccinazioni:</span> <br />{selectedVisit.pediatria.vaccinazioni}</p>}
-                          {selectedVisit.pediatria.tappeSviluppo && <p><span className="font-medium text-gray-700">Sviluppo Motorio:</span> <br />{selectedVisit.pediatria.tappeSviluppo}</p>}
+                          {selectedVisit.pediatria.stadioTurner && <p><span className="font-medium text-gray-700">Stadio di Turner:</span> <br />{selectedVisit.pediatria.stadioTurner}</p>}
+                          {selectedVisit.pediatria.altezzaPadre != null && <p><span className="font-medium text-gray-700">Altezza padre:</span> <br />{selectedVisit.pediatria.altezzaPadre} cm</p>}
+                          {selectedVisit.pediatria.altezzaMadre != null && <p><span className="font-medium text-gray-700">Altezza madre:</span> <br />{selectedVisit.pediatria.altezzaMadre} cm</p>}
                         </div>
                       </CardBody>
                     </Card>
-                    {renderImages(selectedVisit.pediatria.immagini)}
                   </>
                 )}
               </ModalBody>

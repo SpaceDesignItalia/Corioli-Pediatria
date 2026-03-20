@@ -14,6 +14,15 @@ export interface Patient {
   indirizzo?: string;
   telefono?: string;
   email?: string;
+  /** Dati auxologici di base usati per formule/andamento crescita. */
+  peso?: number; // kg
+  altezza?: number; // cm (altezza del paziente/bambino)
+  altezzaPadre?: number; // cm
+  altezzaMadre?: number; // cm
+  /** Allergie/intolleranze cliniche (opzionale). */
+  allergie?: string;
+  /** Nota bene (amica, prezzi, familiarità, ecc.) visibile in anamnesi clinica (opzionale). */
+  notaBene?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -29,12 +38,28 @@ export interface RichiestaEsameComplementare {
   updatedAt: string;
 }
 
+export interface CertificatoPaziente {
+  id: string;
+  patientId: string;
+  tipo: "assenza_lavoro" | "idoneita" | "malattia" | "altro";
+  /** Titolo certificato mostrato in PDF (es. nome modello selezionato). */
+  titolo?: string;
+  dataCertificato: string; // ISO date (YYYY-MM-DD)
+  descrizione?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Visit {
   id: string;
   patientId: string;
   dataVisita: string;
   descrizioneClinica: string;
   anamnesi: string;
+  /** Anamnesi in campi separati (facoltativo, attivabile da preferenze). */
+  anamnesiFisiologica?: string;
+  anamnesiPatologicaRemota?: string;
+  anamnesiProssima?: string;
   esamiObiettivo: string;
   conclusioniDiagnostiche: string;
   terapie: string;
@@ -56,12 +81,21 @@ export interface Visit {
     svezzamento?: string;
     tappeSviluppo?: string; // Es. Controllo capo, seduto, deambulazione, linguaggio
 
+    /** Turner */
+    stadioTurner?: string;
+
     /** Anamnesi e Dati Clinici */
     vaccinazioni?: string;
     pressioneArteriosa?: string;
     temperatura?: string;
     saturazioneO2?: string;
     notePediatriche?: string;
+
+    /** Altezza stimata (target height) - calcolo da altezze genitori */
+    altezzaPadre?: number; // cm
+    altezzaMadre?: number; // cm
+    /** Altezza stimata figli (cm) - inserita manualmente dal medico */
+    altezzaStimataFigli?: number;
 
     /** Array di immagini in base64 (es. foto referti o lesioni cutanee) */
     immagini?: string[];
@@ -113,7 +147,14 @@ export interface Document {
 
 export interface MedicalTemplate {
   id: string;
-  category: 'bilancio_salute' | 'patologia' | 'controllo' | 'urgenza' | 'terapie' | 'esame_complementare';
+  category:
+    | 'bilancio_salute'
+    | 'patologia'
+    | 'controllo'
+    | 'urgenza'
+    | 'terapie'
+    | 'esame_complementare'
+    | 'certificato';
   section: 'anamnesi' | 'esameObiettivo' | 'conclusioni' | 'generale' | 'nome' | 'note';
   label: string;
   text: string;
@@ -125,6 +166,7 @@ export interface AppData {
   patients: Patient[];
   visits: Visit[];
   richiesteEsami?: RichiestaEsameComplementare[];
+  certificati?: CertificatoPaziente[];
   doctor: Doctor;
   documents: Document[];
   templates?: MedicalTemplate[];
@@ -167,6 +209,13 @@ export interface StorageService {
   addDocument(document: Omit<Document, 'id' | 'createdAt' | 'updatedAt'>): Promise<Document>;
   updateDocument(id: string, document: Partial<Document>): Promise<Document>;
   deleteDocument(id: string): Promise<void>;
+
+  // Certificati paziente
+  getCertificatiByPatientId(patientId: string): Promise<CertificatoPaziente[]>;
+  getCertificatoById(id: string): Promise<CertificatoPaziente | null>;
+  addCertificato(cert: Omit<CertificatoPaziente, "id" | "createdAt" | "updatedAt">): Promise<CertificatoPaziente>;
+  updateCertificato(id: string, cert: Partial<CertificatoPaziente>): Promise<CertificatoPaziente>;
+  deleteCertificato(id: string): Promise<void>;
 
   // Template
   getTemplates(): Promise<MedicalTemplate[]>;

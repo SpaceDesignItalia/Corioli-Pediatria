@@ -2,19 +2,19 @@ export const MedicalTemplates = {
   bilancio_salute: {
     anamnesi: [
       {
-        label: "Bilancio di Salute 1 Mese",
+        label: "Visita pediatrica 1 Mese",
         text: "Neonato/a in buone condizioni generali. Allattamento materno esclusivo ben avviato. Calo fisiologico recuperato. Alvo e diuresi regolari."
       },
       {
-        label: "Bilancio di Salute 3 Mesi",
+        label: "Visita pediatrica 3 Mesi",
         text: "Lattante vivace e reattivo. Sorriso sociale presente. Segue gli oggetti con lo sguardo. Sospetta coliche gassose serali."
       },
       {
-        label: "Bilancio di Salute 6 Mesi",
+        label: "Visita pediatrica 6 Mesi",
         text: "Svezzamento iniziato con brodo vegetale e crema di riso. Sta seduto/a con appoggio. Lalla."
       },
       {
-        label: "Bilancio di Salute 12 Mesi",
+        label: "Visita pediatrica 12 Mesi",
         text: "Svezzamento completato, dieta libera. Deambulazione autonoma o con appoggio. Dice 2-3 parole con significato."
       }
     ],
@@ -31,7 +31,7 @@ export const MedicalTemplates = {
     conclusioni: [
       {
         label: "Controllo Regolare",
-        text: "Crescita staturo-ponderale adeguata. Sviluppo psicomotorio nella norma per l'età. Prossimo bilancio di salute come da calendario regionale."
+        text: "Crescita staturo-ponderale adeguata. Sviluppo psicomotorio nella norma per l'età. Prossima visita pediatrica come da calendario regionale."
       }
     ]
   },
@@ -154,5 +154,27 @@ export const MedicalTemplates = {
     { label: "Tampone faringeo", text: "Tampone faringeo per SBEA", note: "Ricerca Streptococco Beta Emolitico di Gruppo A." },
     { label: "Esame feci", text: "Coprocoltura e ricerca Rotavirus/Adenovirus", note: "In corso di gastroenterite protratta." },
     { label: "Emocromo e PCR", text: "Emocromo, formula leucocitaria, PCR", note: "Per valutare infezione sistemica." }
-  ]
+  ],
+  certificato: [
+    {
+      label: "Assenza da scuola (astensione)",
+      text: "Il/la sottoscritto/a Dr./Dr.ssa [NOME DOTT./DOTT.SSA] certifica che il/la paziente [NOME PAZIENTE], nato/a a [LUOGO] il [DATA NASCITA], per motivi clinici necessita di ASTENSIONE dalla frequenza scolastica dal [DATA] al [DATA]. Si attesta l’idoneità alla ripresa qualora in condizioni cliniche adeguate.",
+      note: "assenza astensione scuola",
+    },
+    {
+      label: "Idoneità alla frequenza scolastica (idoneità)",
+      text: "Il/la sottoscritto/a Dr./Dr.ssa [NOME DOTT./DOTT.SSA] attesta che il/la paziente [NOME PAZIENTE], in data [DATA], risulta IDONEO/A alla frequenza scolastica.",
+      note: "idoneità frequenza scolastica",
+    },
+    {
+      label: "Certificato di malattia",
+      text: "Il/la sottoscritto/a Dr./Dr.ssa [NOME DOTT./DOTT.SSA] certifica che il/la paziente [NOME PAZIENTE], in data [DATA], presenta patologia in atto. Si autorizza quanto necessario per il periodo [DATA INIZIO]–[DATA FINE] secondo valutazione clinica.",
+      note: "malattia",
+    },
+    {
+      label: "Altro (testo libero)",
+      text: "Si rilascia certificato per uso medico secondo valutazione clinica in data [DATA]. Descrizione: [INSERIRE TESTO].",
+      note: "altro",
+    },
+  ],
 };

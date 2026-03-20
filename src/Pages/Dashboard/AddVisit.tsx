@@ -9,13 +9,6 @@ import {
   Divider,
   Tabs,
   Tab,
-  Select,
-  SelectItem,
-  Modal,
-  ModalContent,
-  ModalHeader,
-  ModalBody,
-  ModalFooter,
   Dropdown,
   DropdownTrigger,
   DropdownMenu,
@@ -28,10 +21,15 @@ import {
   VisitService,
   TemplateService,
   DoctorService,
+  PreferenceService,
 } from "../../services/OfflineServices";
 import { PdfService } from "../../services/PdfService";
 import { Patient, Visit, MedicalTemplate } from "../../types/Storage";
 import { calculateAge } from "../../utils/dateUtils";
+import {
+  computeWhoPercentileAltezza,
+  computeWhoPercentilePeso,
+} from "../../utils/whoPercentiles";
 import {
   ArrowLeft,
   Printer,
@@ -39,10 +37,7 @@ import {
   AlertCircle,
   Save,
   User,
-  ImagePlus,
-  Trash2,
   Copy,
-  X,
 } from "lucide-react";
 import { useToast } from "../../contexts/ToastContext";
 import { Breadcrumb } from "../../components/Breadcrumb";
@@ -105,6 +100,9 @@ const createDefaultVisitData = () => ({
     | "urgenza",
   descrizioneClinica: "",
   anamnesi: "",
+  anamnesiFisiologica: "",
+  anamnesiPatologicaRemota: "",
+  anamnesiProssima: "",
   esamiObiettivo: "",
   conclusioniDiagnostiche: "",
   terapie: "",
@@ -121,13 +119,187 @@ const createDefaultPediatriaData = () => ({
   allattamento: "",
   svezzamento: "",
   tappeSviluppo: "",
+  stadioTurner: "",
   vaccinazioni: "",
   pressioneArteriosa: "",
   temperatura: "",
   saturazioneO2: "",
+  altezzaPadre: undefined as number | undefined,
+  altezzaMadre: undefined as number | undefined,
+  altezzaStimataFigli: undefined as number | undefined,
   notePediatriche: "",
   immagini: [] as string[],
 });
+
+type GrowthPoint = { x: number; y: number };
+
+const GrowthChart = ({
+  points,
+  arrivalPoint,
+}: {
+  points: GrowthPoint[];
+  /** Punto finale “target” (altezza stimata) calcolato dai genitori. */
+  arrivalPoint?: GrowthPoint;
+}) => {
+  const WIDTH = 520;
+  const HEIGHT = 220;
+  const PAD_X = 42;
+  const PAD_TOP = 24;
+  const PAD_BOTTOM = 38;
+
+  if (!points || points.length === 0) {
+    return (
+      <p className="text-sm text-gray-500">
+        Inserisci almeno un valore di <span className="font-medium">Altezza</span> per vedere il grafico.
+      </p>
+    );
+  }
+
+  const allX = arrivalPoint ? [...points.map((p) => p.x), arrivalPoint.x] : points.map((p) => p.x);
+  const allY = arrivalPoint ? [...points.map((p) => p.y), arrivalPoint.y] : points.map((p) => p.y);
+
+  const minX = Math.min(...allX);
+  const maxX = Math.max(...allX);
+  const rawMinY = Math.min(...allY);
+  const rawMaxY = Math.max(...allY);
+
+  const spanX = Math.max(1, maxX - minX);
+  const spanY = Math.max(1, rawMaxY - rawMinY);
+
+  const minY = rawMinY - spanY * 0.1;
+  const maxY = rawMaxY + spanY * 0.1;
+
+  const xScale = (x: number) => PAD_X + ((x - minX) / spanX) * (WIDTH - PAD_X * 2);
+  const yScale = (y: number) =>
+    HEIGHT - PAD_BOTTOM - ((y - minY) / (maxY - minY)) * (HEIGHT - PAD_TOP - PAD_BOTTOM);
+
+  const poly = points.map((p) => `${xScale(p.x)},${yScale(p.y)}`).join(" ");
+
+  const first = points[0];
+  const last = points[points.length - 1];
+
+  return (
+    <div className="w-full">
+      <svg
+        viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
+        className="w-full h-auto"
+        role="img"
+        aria-label="Grafico andamento crescita altezza"
+      >
+        <rect
+          x="0.5"
+          y="0.5"
+          width={WIDTH - 1}
+          height={HEIGHT - 1}
+          rx="14"
+          fill="white"
+          stroke="#E5E7EB"
+        />
+
+        {/* Griglia + etichette assi (Y in cm, X in date) */}
+        {Array.from({ length: 5 }).map((_, i) => {
+          const t = i / 4; // 0..1
+          const yPos = PAD_TOP + (HEIGHT - PAD_TOP - PAD_BOTTOM) * t;
+          // In alto devono comparire i cm maggiori, in basso i minori.
+          const yVal = maxY - (maxY - minY) * t;
+          return (
+            <g key={`y-${i}`}>
+              <line
+                x1={PAD_X}
+                x2={WIDTH - PAD_X}
+                y1={yPos}
+                y2={yPos}
+                stroke="#F3F4F6"
+                strokeWidth="1"
+              />
+              <text
+                x={PAD_X - 8}
+                y={yPos + 3}
+                textAnchor="end"
+                fontSize="10"
+                fontWeight="600"
+                fill="#374151"
+              >
+                {Number.isFinite(yVal) ? `${Math.round(yVal)} cm` : ""}
+              </text>
+            </g>
+          );
+        })}
+
+        {Array.from({ length: 4 }).map((_, i) => {
+          const t = i / 3; // 0..1
+          const ts = minX + (maxX - minX) * t;
+          const xPos = xScale(ts);
+          const label = new Date(ts).toLocaleDateString("it-IT", {
+            day: "2-digit",
+            month: "2-digit",
+            year: "2-digit",
+          });
+          return (
+            <g key={`x-${i}`}>
+              <line
+                x1={xPos}
+                x2={xPos}
+                y1={PAD_TOP}
+                y2={HEIGHT - PAD_BOTTOM}
+                stroke="#F3F4F6"
+                strokeWidth="1"
+              />
+              <text
+                x={xPos}
+                y={HEIGHT - PAD_BOTTOM + 16}
+                textAnchor={i === 0 ? "start" : i === 3 ? "end" : "middle"}
+                fontSize="10"
+                fontWeight="600"
+                fill="#374151"
+              >
+                {label}
+              </text>
+            </g>
+          );
+        })}
+
+        <polyline
+          points={poly}
+          fill="none"
+          stroke="#2563EB"
+          strokeWidth="2.5"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+
+        {points.map((p, idx) => (
+          <circle
+            key={`${p.x}-${idx}`}
+            cx={xScale(p.x)}
+            cy={yScale(p.y)}
+            r="4.2"
+            fill="#2563EB"
+            stroke="white"
+            strokeWidth="2"
+          />
+        ))}
+
+        {arrivalPoint && (
+          (() => {
+            const cx = xScale(arrivalPoint.x);
+            const cy = yScale(arrivalPoint.y);
+            // Diamante per evidenziare il target (altezza stimata)
+            return (
+              <polygon
+                points={`${cx},${cy - 6} ${cx + 6},${cy} ${cx},${cy + 6} ${cx - 6},${cy}`}
+                fill="#16A34A"
+                stroke="white"
+                strokeWidth="2"
+              />
+            );
+          })()
+        )}
+      </svg>
+
+    </div>
+  );
+};
 
 export default function AddVisit() {
   const [searchParams] = useSearchParams();
@@ -143,16 +315,15 @@ export default function AddVisit() {
   const [pdfLoading, setPdfLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
-  const [fullscreenImage, setFullscreenImage] = useState<string | null>(null);
-  const [isIncludeImagesModalOpen, setIsIncludeImagesModalOpen] =
-    useState(false);
-  const [includeImagesCount, setIncludeImagesCount] = useState(0);
   const [copiedPreviousType, setCopiedPreviousType] = useState<string | null>(
     null,
   );
-  const includeImagesResolverRef = useRef<((value: boolean) => void) | null>(
-    null,
-  );
+
+  const [pediatriaAnamnesiSplit, setPediatriaAnamnesiSplit] = useState(false);
+  const [isPercentilePesoManual, setIsPercentilePesoManual] = useState(false);
+  const [isPercentileAltezzaManual, setIsPercentileAltezzaManual] = useState(false);
+  const [percentilePesoSuggested, setPercentilePesoSuggested] = useState<string>("");
+  const [percentileAltezzaSuggested, setPercentileAltezzaSuggested] = useState<string>("");
   const initialLoadDone = useRef(false);
 
   const [allTemplates, setAllTemplates] = useState<MedicalTemplate[]>([]);
@@ -160,6 +331,18 @@ export default function AddVisit() {
   const [pediatriaData, setPediatriaData] = useState(
     createDefaultPediatriaData,
   );
+
+  useEffect(() => {
+    // Preferenze locali per abilitare/disabilitare l'anamnesi in campi separati
+    PreferenceService.getPreferences()
+      .then((prefs) => {
+        if (!prefs) return;
+        setPediatriaAnamnesiSplit(Boolean(prefs.pediatriaAnamnesiSplit));
+      })
+      .catch(() => {
+        // In caso di errore usiamo il valore di default
+      });
+  }, []);
 
   useEffect(() => {
     const loadData = async () => {
@@ -172,6 +355,10 @@ export default function AddVisit() {
       setPatientVisits([]);
       setVisitData(createDefaultVisitData());
       setPediatriaData(createDefaultPediatriaData());
+      setIsPercentilePesoManual(false);
+      setIsPercentileAltezzaManual(false);
+      setPercentilePesoSuggested("");
+      setPercentileAltezzaSuggested("");
 
       try {
         const templates = await TemplateService.getAllTemplates();
@@ -204,6 +391,10 @@ export default function AddVisit() {
               tipo: (visit.tipo as any) || "bilancio_salute",
               descrizioneClinica: visit.descrizioneClinica || "",
               anamnesi: visit.anamnesi || "",
+              anamnesiFisiologica:
+                visit.anamnesiFisiologica || visit.anamnesi || "",
+              anamnesiPatologicaRemota: visit.anamnesiPatologicaRemota || "",
+              anamnesiProssima: visit.anamnesiProssima || "",
               esamiObiettivo: visit.esamiObiettivo || "",
               conclusioniDiagnostiche: [
                 visit.conclusioniDiagnostiche,
@@ -216,12 +407,25 @@ export default function AddVisit() {
 
             if (visit.pediatria) {
               setPediatriaData((prev) => ({ ...prev, ...visit.pediatria }));
+              setIsPercentilePesoManual(Boolean(visit.pediatria.percentilePeso?.trim()));
+              setIsPercentileAltezzaManual(Boolean(visit.pediatria.percentileAltezza?.trim()));
             }
             const patientData = await PatientService.getPatientById(
               visit.patientId,
             );
             setPatient(patientData);
-            if (patientData) await loadPatientVisits(patientData.id);
+            if (patientData) {
+              // Se in visita mancano alcuni valori auxologici, li prendiamo dalla scheda paziente.
+              setPediatriaData((prev) => ({
+                ...prev,
+                altezza: prev.altezza ?? patientData.altezza,
+                altezzaPadre:
+                  prev.altezzaPadre ?? patientData.altezzaPadre,
+                altezzaMadre:
+                  prev.altezzaMadre ?? patientData.altezzaMadre,
+              }));
+              await loadPatientVisits(patientData.id);
+            }
           } else {
             setError("Visita non trovata");
           }
@@ -236,6 +440,14 @@ export default function AddVisit() {
           try {
             const patientData = await PatientService.getPatientById(patientId);
             setPatient(patientData);
+            // Precompila dati auxologici dalla scheda paziente (solo nuova visita).
+            setPediatriaData((prev) => ({
+              ...prev,
+              peso: patientData.peso ?? prev.peso,
+              altezza: patientData.altezza ?? prev.altezza,
+              altezzaPadre: patientData.altezzaPadre ?? prev.altezzaPadre,
+              altezzaMadre: patientData.altezzaMadre ?? prev.altezzaMadre,
+            }));
             if (patientData) await loadPatientVisits(patientData.id);
           } catch (error) {
             setError("Errore nel caricamento dati paziente");
@@ -244,6 +456,13 @@ export default function AddVisit() {
           try {
             const patientData = await PatientService.getPatientByCF(patientCf);
             setPatient(patientData);
+            setPediatriaData((prev) => ({
+              ...prev,
+              peso: patientData.peso ?? prev.peso,
+              altezza: patientData.altezza ?? prev.altezza,
+              altezzaPadre: patientData.altezzaPadre ?? prev.altezzaPadre,
+              altezzaMadre: patientData.altezzaMadre ?? prev.altezzaMadre,
+            }));
             if (patientData) await loadPatientVisits(patientData.id);
           } catch (error) {
             setError("Errore nel caricamento dati paziente");
@@ -258,22 +477,64 @@ export default function AddVisit() {
   }, [searchParams, visitId]);
 
   useEffect(() => {
+    if (!patient) return;
+    if (visitData.tipo !== "bilancio_salute") return;
+
+    let cancelled = false;
+
+    (async () => {
+      const birthDateIso = patient.dataNascita;
+      const referenceDateIso = visitData.dataVisita;
+
+      const currentPeso = pediatriaData.peso;
+      const currentAltezza = pediatriaData.altezza;
+
+      let newPercentilePeso = "";
+      if (currentPeso != null && Number.isFinite(currentPeso)) {
+        newPercentilePeso = (await computeWhoPercentilePeso({
+          birthDateIso,
+          referenceDateIso,
+          sex: patient.sesso,
+          weightKg: currentPeso,
+        })) ?? "";
+      }
+
+      let newPercentileAltezza = "";
+      if (currentAltezza != null && Number.isFinite(currentAltezza)) {
+        newPercentileAltezza = (await computeWhoPercentileAltezza({
+          birthDateIso,
+          referenceDateIso,
+          sex: patient.sesso,
+          heightCm: currentAltezza,
+        })) ?? "";
+      }
+
+      if (cancelled) return;
+
+      // Non sovrascrivo mai il valore inserito dall'utente.
+      // Aggiorno solo la "suggestion" da mostrare come Chip.
+      setPercentilePesoSuggested(newPercentilePeso);
+      setPercentileAltezzaSuggested(newPercentileAltezza);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    patient,
+    visitData.tipo,
+    visitData.dataVisita,
+    pediatriaData.peso,
+    pediatriaData.altezza,
+  ]);
+
+  useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       if (hasUnsavedChanges) e.preventDefault();
     };
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [hasUnsavedChanges]);
-
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && fullscreenImage) {
-        setFullscreenImage(null);
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [fullscreenImage]);
 
   const handleTemplateSelect = (field: string, text: string) => {
     setVisitData((prev) => ({
@@ -309,20 +570,50 @@ export default function AddVisit() {
         patientId: patient.id,
         dataVisita: visitData.dataVisita,
         descrizioneClinica: visitData.descrizioneClinica,
-        anamnesi: visitData.anamnesi,
+        anamnesi: (() => {
+          if (!pediatriaAnamnesiSplit) return visitData.anamnesi;
+          const fisiologica = (visitData.anamnesiFisiologica || "").trim();
+          const remota = (visitData.anamnesiPatologicaRemota || "").trim();
+          const prossima = (visitData.anamnesiProssima || "").trim();
+          const parts = [];
+          if (fisiologica) parts.push(`1. Fisiologica\n${fisiologica}`);
+          if (remota) parts.push(`2. Patologica remota\n${remota}`);
+          if (prossima) parts.push(`3. Prossima\n${prossima}`);
+          return parts.join("\n\n");
+        })(),
         esamiObiettivo: visitData.esamiObiettivo,
         conclusioniDiagnostiche: visitData.conclusioniDiagnostiche,
         terapie: "",
         tipo: visitData.tipo as any,
+        ...(pediatriaAnamnesiSplit
+          ? {
+              anamnesiFisiologica: visitData.anamnesiFisiologica,
+              anamnesiPatologicaRemota: visitData.anamnesiPatologicaRemota,
+              anamnesiProssima: visitData.anamnesiProssima,
+            }
+          : {}),
         pediatria: pediatriaData,
       };
 
       if (isEditMode && existingVisit) {
         await VisitService.updateVisit(existingVisit.id, visitToSave);
+        // Mantieni coerenti i dati auxologici anche nella scheda paziente.
+        await PatientService.updatePatient(patient.id, {
+          peso: pediatriaData.peso,
+          altezza: pediatriaData.altezza,
+          altezzaPadre: pediatriaData.altezzaPadre,
+          altezzaMadre: pediatriaData.altezzaMadre,
+        });
         setHasUnsavedChanges(false);
         showToast("Visita aggiornata con successo!");
       } else {
         await VisitService.addVisit(visitToSave);
+        await PatientService.updatePatient(patient.id, {
+          peso: pediatriaData.peso,
+          altezza: pediatriaData.altezza,
+          altezzaPadre: pediatriaData.altezzaPadre,
+          altezzaMadre: pediatriaData.altezzaMadre,
+        });
         setHasUnsavedChanges(false);
         showToast("Visita salvata con successo!");
       }
@@ -353,6 +644,9 @@ export default function AddVisit() {
         ...prev,
         descrizioneClinica: "",
         anamnesi: "",
+        anamnesiFisiologica: "",
+        anamnesiPatologicaRemota: "",
+        anamnesiProssima: "",
         esamiObiettivo: "",
         conclusioniDiagnostiche: "",
         terapie: "",
@@ -374,17 +668,19 @@ export default function AddVisit() {
       ...prev,
       descrizioneClinica: previousVisit.descrizioneClinica || "",
       anamnesi: previousVisit.anamnesi || "",
+      anamnesiFisiologica:
+        (previousVisit as any).anamnesiFisiologica || previousVisit.anamnesi || "",
+      anamnesiPatologicaRemota:
+        (previousVisit as any).anamnesiPatologicaRemota || "",
+      anamnesiProssima:
+        (previousVisit as any).anamnesiProssima || "",
       esamiObiettivo: previousVisit.esamiObiettivo || "",
       conclusioniDiagnostiche: previousVisit.conclusioniDiagnostiche || "",
       terapie: previousVisit.terapie || "",
     }));
-
     if (previousVisit.pediatria) {
-      setPediatriaData((prev) => ({
-        ...prev,
-        ...previousVisit.pediatria,
-        immagini: previousVisit.pediatria?.immagini ?? [],
-      }));
+      // Copia dati pediatrici senza gestire immagini (sezione rimossa).
+      setPediatriaData((prev) => ({ ...prev, ...previousVisit.pediatria }));
     }
 
     setHasUnsavedChanges(true);
@@ -405,79 +701,6 @@ export default function AddVisit() {
       reader.readAsDataURL(blob);
     });
 
-  const fileToDataUrl = (file: File): Promise<string> =>
-    new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-
-  const handleImagesUpload = async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    const maxImages = 8;
-    const maxFileSize = 7 * 1024 * 1024;
-
-    const currentImages = pediatriaData.immagini ?? [];
-
-    if (currentImages.length >= maxImages) {
-      showToast(
-        `Hai già raggiunto il massimo di ${maxImages} immagini.`,
-        "info",
-      );
-      return;
-    }
-
-    try {
-      const validFiles = Array.from(files).filter((file) => {
-        if (!file.type.startsWith("image/")) return false;
-        if (file.size > maxFileSize) {
-          showToast(`File "${file.name}" troppo grande (max 7MB).`, "info");
-          return false;
-        }
-        return true;
-      });
-
-      const availableSlots = Math.max(0, maxImages - currentImages.length);
-      const filesToLoad = validFiles.slice(0, availableSlots);
-      const encoded = await Promise.all(filesToLoad.map(fileToDataUrl));
-
-      setPediatriaData((prev) => ({
-        ...prev,
-        immagini: [...(prev.immagini ?? []), ...encoded],
-      }));
-
-      if (initialLoadDone.current) setHasUnsavedChanges(true);
-      if (encoded.length > 0)
-        showToast(`${encoded.length} immagine/i caricata/e.`);
-    } catch (err) {
-      console.error("Errore caricamento immagini:", err);
-      showToast("Errore durante il caricamento delle immagini.", "error");
-    }
-  };
-
-  const handleRemoveImage = (imageIndex: number) => {
-    setPediatriaData((prev) => ({
-      ...prev,
-      immagini: (prev.immagini ?? []).filter((_, idx) => idx !== imageIndex),
-    }));
-    if (initialLoadDone.current) setHasUnsavedChanges(true);
-  };
-
-  const askIncludeImages = (count: number): Promise<boolean> => {
-    setIncludeImagesCount(count);
-    setIsIncludeImagesModalOpen(true);
-    return new Promise((resolve) => {
-      includeImagesResolverRef.current = resolve;
-    });
-  };
-
-  const resolveIncludeImages = (include: boolean) => {
-    setIsIncludeImagesModalOpen(false);
-    includeImagesResolverRef.current?.(include);
-    includeImagesResolverRef.current = null;
-  };
-
   const handlePrintPdf = async () => {
     if (!patient) return;
 
@@ -486,7 +709,17 @@ export default function AddVisit() {
       patientId: patient.id,
       dataVisita: visitData.dataVisita,
       descrizioneClinica: visitData.descrizioneClinica,
-      anamnesi: visitData.anamnesi,
+      anamnesi: (() => {
+        if (!pediatriaAnamnesiSplit) return visitData.anamnesi;
+        const fisiologica = (visitData.anamnesiFisiologica || "").trim();
+        const remota = (visitData.anamnesiPatologicaRemota || "").trim();
+        const prossima = (visitData.anamnesiProssima || "").trim();
+        const parts = [];
+        if (fisiologica) parts.push(`1. Fisiologica\n${fisiologica}`);
+        if (remota) parts.push(`2. Patologica remota\n${remota}`);
+        if (prossima) parts.push(`3. Prossima\n${prossima}`);
+        return parts.join("\n\n");
+      })(),
       esamiObiettivo: visitData.esamiObiettivo,
       conclusioniDiagnostiche: visitData.conclusioniDiagnostiche,
       terapie: visitData.terapie,
@@ -496,18 +729,15 @@ export default function AddVisit() {
       updatedAt: new Date().toISOString(),
     };
 
-    const imageCount = currentVisit.pediatria?.immagini?.length ?? 0;
-    let includeImages = false;
-    if (imageCount > 0) {
-      includeImages = await askIncludeImages(imageCount);
-    }
-
     setPdfLoading(true);
     try {
+      const includeGrowthChart = window.confirm(
+        "Nel PDF vuoi includere il grafico andamento crescita?"
+      );
       const blob = await (PdfService as any).generatePediatricPDF?.(
         patient,
         currentVisit,
-        { includeImages },
+        { includeGrowthChart },
       );
       if (!blob) {
         showToast(
@@ -613,6 +843,57 @@ export default function AddVisit() {
   const canCopyOrClear =
     hasPreviousVisitForCurrentType || copiedPreviousType === visitData.tipo;
 
+  const growthPoints = (() => {
+    const saved = patientVisits
+      .filter((v) => v.pediatria?.altezza != null)
+      .filter((v) => !existingVisit || v.id !== existingVisit.id)
+      .map((v) => ({
+        x: new Date(v.dataVisita).getTime(),
+        y: v.pediatria?.altezza as number,
+      }));
+
+    const current =
+      pediatriaData.altezza != null
+        ? [
+            {
+              x: new Date(visitData.dataVisita).getTime(),
+              y: pediatriaData.altezza as number,
+            },
+          ]
+        : [];
+
+    return [...saved, ...current]
+      .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y))
+      .sort((a, b) => a.x - b.x);
+  })();
+
+  const arrivalPoint = (() => {
+    const manualEst = pediatriaData.altezzaStimataFigli;
+    if (manualEst != null && Number.isFinite(manualEst)) {
+      const x = new Date(visitData.dataVisita).getTime() + 1;
+      return { x, y: Number(manualEst.toFixed(1)) };
+    }
+
+    const father = pediatriaData.altezzaPadre;
+    const mother = pediatriaData.altezzaMadre;
+    if (!patient?.sesso) return undefined;
+    if (
+      father == null ||
+      mother == null ||
+      !Number.isFinite(father) ||
+      !Number.isFinite(mother)
+    ) {
+      return undefined;
+    }
+
+    const sum = father + mother;
+    const est = patient.sesso === "M" ? (sum + 13) / 2 : (sum - 13) / 2;
+    if (!Number.isFinite(est)) return undefined;
+
+    const x = new Date(visitData.dataVisita).getTime() + 1; // spostato di poco per non sovrapporsi all’ultimo punto
+    return { x, y: Number(est.toFixed(1)) };
+  })();
+
   return (
     <div className="max-w-[1200px] mx-auto space-y-6 pb-32">
       <Breadcrumb items={breadcrumbItems} />
@@ -717,8 +998,10 @@ export default function AddVisit() {
               "group-data-[selected=true]:text-primary group-data-[selected=true]:font-bold text-gray-500 font-medium",
           }}
         >
-          <Tab key="bilancio_salute" title="Bilancio di Salute" />
-          <Tab key="patologia" title="Visita per Patologia" />
+          <Tab key="bilancio_salute" title="Visita pediatrica" />
+          {isEditMode && visitData.tipo === "patologia" && (
+            <Tab key="patologia" title="Visita per Patologia" />
+          )}
           <Tab key="controllo" title="Visita di Controllo" />
         </Tabs>
 
@@ -728,75 +1011,155 @@ export default function AddVisit() {
           <div className="w-full lg:w-[32%] min-w-[300px] space-y-6">
             <Card className="shadow-sm border border-default-200 bg-white">
               <CardHeader className="pb-0 pt-4 px-4 font-semibold text-gray-700 uppercase text-xs tracking-wider">
-                {visitData.tipo === "bilancio_salute"
-                  ? "Parametri Auxologici & Vitali"
-                  : "Parametri Vitali"}
+                Parametri Auxologici & Vitali
               </CardHeader>
               <CardBody className="px-4 py-4 space-y-4">
-                <div className="grid grid-cols-2 gap-3">
-                  <Input
-                    type="number"
-                    label="Peso (kg)"
-                    value={pediatriaData.peso?.toString() || ""}
-                    onValueChange={(v) =>
-                      handlePediatriaChange("peso", parseFloat(v) || undefined)
-                    }
-                    variant="bordered"
-                    size="sm"
-                    labelPlacement="outside"
-                    step="0.01"
-                    className={
-                      visitData.tipo !== "bilancio_salute" ? "col-span-2" : ""
-                    }
-                  />
-                  {visitData.tipo === "bilancio_salute" && (
+                {visitData.tipo === "bilancio_salute" ? (
+                  <>
+                    <div className="grid grid-cols-2 gap-3">
+                      <Input
+                        type="number"
+                        label="Peso (kg)"
+                        value={pediatriaData.peso?.toString() || ""}
+                        onValueChange={(v) =>
+                          handlePediatriaChange("peso", parseFloat(v) || undefined)
+                        }
+                        variant="bordered"
+                        size="sm"
+                        labelPlacement="outside"
+                        placeholder="es. 12.5"
+                        step="0.01"
+                      />
+                      <div className="relative">
+                          <Input
+                            type="text"
+                            label="Percentile Peso"
+                            value={pediatriaData.percentilePeso}
+                            variant="bordered"
+                            size="sm"
+                            labelPlacement="outside"
+                            placeholder="es. 50"
+                            onValueChange={(v) => {
+                              const trimmed = (v ?? "").toString().trim();
+                              setIsPercentilePesoManual(trimmed.length > 0);
+                              handlePediatriaChange(
+                                "percentilePeso",
+                                trimmed.length > 0 ? v : "",
+                              );
+                            }}
+                          />
+                          {percentilePesoSuggested && (
+                            <div className="absolute right-0 -top-0.5 z-10">
+                              <Chip
+                                size="sm"
+                                color="primary"
+                                variant="flat"
+                                className="cursor-pointer hover:bg-primary/20 h-6 px-1"
+                                onClick={() => {
+                                  setIsPercentilePesoManual(true);
+                                  handlePediatriaChange(
+                                    "percentilePeso",
+                                    percentilePesoSuggested,
+                                  );
+                                }}
+                              >
+                                Suggerito: {percentilePesoSuggested}°
+                              </Chip>
+                            </div>
+                          )}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <Input
+                        type="number"
+                        label="Altezza (cm)"
+                        value={pediatriaData.altezza?.toString() || ""}
+                        onValueChange={(v) =>
+                          handlePediatriaChange("altezza", parseFloat(v) || undefined)
+                        }
+                        variant="bordered"
+                        size="sm"
+                        labelPlacement="outside"
+                        placeholder="es. 80.0"
+                        step="0.1"
+                      />
+                      <div className="relative">
+                          <Input
+                            type="text"
+                            label="Percentile Altezza"
+                            value={pediatriaData.percentileAltezza}
+                            variant="bordered"
+                            size="sm"
+                            labelPlacement="outside"
+                            placeholder="es. 50"
+                            onValueChange={(v) => {
+                              const trimmed = (v ?? "").toString().trim();
+                              setIsPercentileAltezzaManual(trimmed.length > 0);
+                              handlePediatriaChange(
+                                "percentileAltezza",
+                                trimmed.length > 0 ? v : "",
+                              );
+                            }}
+                          />
+                          {percentileAltezzaSuggested && (
+                            <div className="absolute right-0 -top-0.5 z-10">
+                              <Chip
+                                size="sm"
+                                color="primary"
+                                variant="flat"
+                                className="cursor-pointer hover:bg-primary/20 h-6 px-1"
+                                onClick={() => {
+                                  setIsPercentileAltezzaManual(true);
+                                  handlePediatriaChange(
+                                    "percentileAltezza",
+                                    percentileAltezzaSuggested,
+                                  );
+                                }}
+                              >
+                                Suggerito: {percentileAltezzaSuggested}°
+                              </Chip>
+                            </div>
+                          )}
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="grid grid-cols-2 gap-3">
                     <Input
-                      type="text"
-                      label="Percentile Peso"
-                      value={pediatriaData.percentilePeso}
+                      type="number"
+                      label="Peso (kg)"
+                      value={pediatriaData.peso?.toString() || ""}
                       onValueChange={(v) =>
-                        handlePediatriaChange("percentilePeso", v)
+                        handlePediatriaChange(
+                          "peso",
+                          parseFloat(v) || undefined,
+                        )
                       }
                       variant="bordered"
                       size="sm"
                       labelPlacement="outside"
-                      placeholder="es. 50°"
+                      placeholder="es. 12.5"
+                      step="0.01"
                     />
-                  )}
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <Input
-                    type="number"
-                    label="Altezza (cm)"
-                    value={pediatriaData.altezza?.toString() || ""}
-                    onValueChange={(v) =>
-                      handlePediatriaChange(
-                        "altezza",
-                        parseFloat(v) || undefined,
-                      )
-                    }
-                    variant="bordered"
-                    size="sm"
-                    labelPlacement="outside"
-                    step="0.1"
-                    className={
-                      visitData.tipo !== "bilancio_salute" ? "col-span-2" : ""
-                    }
-                  />
-                  {visitData.tipo === "bilancio_salute" && (
                     <Input
-                      type="text"
-                      label="Percentile Altezza"
-                      value={pediatriaData.percentileAltezza}
+                      type="number"
+                      label="Altezza (cm)"
+                      value={pediatriaData.altezza?.toString() || ""}
                       onValueChange={(v) =>
-                        handlePediatriaChange("percentileAltezza", v)
+                        handlePediatriaChange(
+                          "altezza",
+                          parseFloat(v) || undefined,
+                        )
                       }
                       variant="bordered"
                       size="sm"
                       labelPlacement="outside"
+                      placeholder="es. 80.0"
+                      step="0.1"
                     />
-                  )}
-                </div>
+                  </div>
+                )}
                 {visitData.tipo === "bilancio_salute" && (
                   <div className="grid grid-cols-2 gap-3">
                     <Input
@@ -814,6 +1177,7 @@ export default function AddVisit() {
                       variant="bordered"
                       size="sm"
                       labelPlacement="outside"
+                      placeholder="es. 34.5"
                       step="0.1"
                     />
                     <Input
@@ -826,6 +1190,7 @@ export default function AddVisit() {
                       variant="bordered"
                       size="sm"
                       labelPlacement="outside"
+                      placeholder="es. 50°"
                     />
                   </div>
                 )}
@@ -833,166 +1198,94 @@ export default function AddVisit() {
                 <div className="grid grid-cols-2 gap-3">
                   <Input
                     type="text"
-                    label="Temperatura (°C)"
-                    value={pediatriaData.temperatura}
+                    label="Stadio di Turner"
+                    value={pediatriaData.stadioTurner || ""}
                     onValueChange={(v) =>
-                      handlePediatriaChange("temperatura", v)
+                      handlePediatriaChange("stadioTurner", v)
                     }
                     variant="bordered"
                     size="sm"
                     labelPlacement="outside"
-                    placeholder="es. 37.5"
+                    placeholder="es. stadio puberale / descrizione libera"
                   />
                   <Input
                     type="text"
-                    label="SpO2 (%)"
-                    value={pediatriaData.saturazioneO2}
+                    label="Pressione Arteriosa"
+                    value={pediatriaData.pressioneArteriosa}
                     onValueChange={(v) =>
-                      handlePediatriaChange("saturazioneO2", v)
+                      handlePediatriaChange("pressioneArteriosa", v)
                     }
                     variant="bordered"
                     size="sm"
                     labelPlacement="outside"
-                    placeholder="es. 98"
+                    placeholder="es. 100/60"
                   />
                 </div>
-                <Input
-                  type="text"
-                  label="Pressione Arteriosa"
-                  value={pediatriaData.pressioneArteriosa}
-                  onValueChange={(v) =>
-                    handlePediatriaChange("pressioneArteriosa", v)
+
+                {(() => {
+                  const hasFather = patient.altezzaPadre != null && Number.isFinite(patient.altezzaPadre);
+                  const hasMother = patient.altezzaMadre != null && Number.isFinite(patient.altezzaMadre);
+
+                  const showFather = !hasFather;
+                  const showMother = !hasMother;
+
+                  // Se entrambi presenti in scheda paziente, non li chiediamo più.
+                  if (!showFather && !showMother) {
+                    // Non mostriamo nulla qui: i genitori sono già presenti in scheda paziente.
+                    return null;
                   }
-                  variant="bordered"
-                  size="sm"
-                  labelPlacement="outside"
-                  placeholder="es. 100/60"
-                />
+
+                  return (
+                    <div className={`grid gap-3 pt-2 ${showFather && showMother ? "grid-cols-2" : "grid-cols-1"}`}>
+                      {showFather && (
+                        <Input
+                          type="number"
+                          label="Altezza padre (cm)"
+                          value={pediatriaData.altezzaPadre?.toString() || ""}
+                          onValueChange={(v) =>
+                            handlePediatriaChange(
+                              "altezzaPadre",
+                              parseFloat(v) || undefined,
+                            )
+                          }
+                          variant="bordered"
+                          size="sm"
+                          labelPlacement="outside"
+                          placeholder="es. 175"
+                          step="0.1"
+                        />
+                      )}
+                      {showMother && (
+                        <Input
+                          type="number"
+                          label="Altezza madre (cm)"
+                          value={pediatriaData.altezzaMadre?.toString() || ""}
+                          onValueChange={(v) =>
+                            handlePediatriaChange(
+                              "altezzaMadre",
+                              parseFloat(v) || undefined,
+                            )
+                          }
+                          variant="bordered"
+                          size="sm"
+                          labelPlacement="outside"
+                          placeholder="es. 162"
+                          step="0.1"
+                        />
+                      )}
+                    </div>
+                  );
+                })()}
               </CardBody>
             </Card>
 
-            {visitData.tipo === "bilancio_salute" && (
-              <Card className="shadow-sm border border-default-200 bg-white">
-                <CardHeader className="pb-0 pt-4 px-4 font-semibold text-gray-700 uppercase text-xs tracking-wider">
-                  Sviluppo & Nutrizione
-                </CardHeader>
-                <CardBody className="px-4 py-4 space-y-4">
-                  <Select
-                    label="Tipo Allattamento"
-                    labelPlacement="outside"
-                    selectedKeys={
-                      pediatriaData.allattamento
-                        ? [pediatriaData.allattamento]
-                        : []
-                    }
-                    onSelectionChange={(keys) =>
-                      handlePediatriaChange(
-                        "allattamento",
-                        String(Array.from(keys)[0] || ""),
-                      )
-                    }
-                    variant="bordered"
-                    size="sm"
-                  >
-                    <SelectItem key="Materno Esclusivo">
-                      Materno Esclusivo
-                    </SelectItem>
-                    <SelectItem key="Misto">Misto</SelectItem>
-                    <SelectItem key="Formula">Formula</SelectItem>
-                    <SelectItem key="Non allattato">Non allattato</SelectItem>
-                  </Select>
-
-                  <Input
-                    type="text"
-                    label="Svezzamento"
-                    value={pediatriaData.svezzamento}
-                    onValueChange={(v) =>
-                      handlePediatriaChange("svezzamento", v)
-                    }
-                    variant="bordered"
-                    size="sm"
-                    labelPlacement="outside"
-                    placeholder="es. Iniziato / Tappe..."
-                  />
-
-                  <Textarea
-                    label="Tappe Sviluppo"
-                    value={pediatriaData.tappeSviluppo}
-                    onValueChange={(v) =>
-                      handlePediatriaChange("tappeSviluppo", v)
-                    }
-                    variant="bordered"
-                    labelPlacement="outside"
-                    minRows={2}
-                    placeholder="Note sullo sviluppo psicomotorio..."
-                  />
-                  <Textarea
-                    label="Stato Vaccinale"
-                    value={pediatriaData.vaccinazioni}
-                    onValueChange={(v) =>
-                      handlePediatriaChange("vaccinazioni", v)
-                    }
-                    variant="bordered"
-                    labelPlacement="outside"
-                    minRows={2}
-                    placeholder="es. Regolari / Da effettuare..."
-                  />
-                </CardBody>
-              </Card>
-            )}
-
             <Card className="shadow-sm border border-default-200 bg-white">
               <CardHeader className="pb-0 pt-4 px-4 font-semibold text-gray-700 uppercase text-xs tracking-wider">
-                Files e Immagini
+                Grafico andamento crescita
               </CardHeader>
-              <CardBody className="px-4 py-6 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-gray-500">
-                    {(pediatriaData.immagini ?? []).length}/8 immagini
-                  </span>
-                </div>
-
-                <label className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed border-gray-300 bg-gray-50 hover:border-primary cursor-pointer text-sm">
-                  <ImagePlus size={16} />
-                  Carica immagini
-                  <input
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    className="hidden"
-                    onChange={(e) => {
-                      handleImagesUpload(e.target.files);
-                      e.currentTarget.value = "";
-                    }}
-                  />
-                </label>
-
-                {(pediatriaData.immagini ?? []).length > 0 && (
-                  <div className="grid grid-cols-2 gap-3">
-                    {(pediatriaData.immagini ?? []).map((image, idx) => (
-                      <div
-                        key={`ped-eco-${idx}`}
-                        className="relative group border rounded-lg overflow-hidden bg-gray-50"
-                      >
-                        <img
-                          src={image}
-                          alt={`Immagine ${idx + 1}`}
-                          className="w-full h-28 object-cover cursor-zoom-in"
-                          onClick={() => setFullscreenImage(image)}
-                          title="Clicca per ingrandire"
-                        />
-                        <button
-                          type="button"
-                          className="absolute top-1 right-1 p-1 rounded-full bg-black/60 text-white opacity-0 group-hover:opacity-100 transition-opacity"
-                          onClick={() => handleRemoveImage(idx)}
-                          aria-label="Rimuovi immagine"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
+              <CardBody className="px-4 py-4">
+                {/* Il grafico usa le altezze salvate nelle visite del paziente */}
+                <GrowthChart points={growthPoints} arrivalPoint={arrivalPoint} />
               </CardBody>
             </Card>
           </div>
@@ -1005,39 +1298,144 @@ export default function AddVisit() {
               </CardHeader>
               <CardBody className="p-6 space-y-8">
                 {/* 1. Anamnesi */}
-                <div className="space-y-2 relative group">
-                  <div className="flex justify-between items-end mb-1">
-                    <label className="text-sm font-bold text-gray-700">
-                      1. Anamnesi
-                    </label>
-                    <TemplateSelector
-                      templates={allTemplates.filter(
-                        (t) =>
-                          t.category === visitData.tipo &&
-                          t.section === "anamnesi",
-                      )}
-                      onSelect={(t) => handleTemplateSelect("anamnesi", t)}
+                {pediatriaAnamnesiSplit ? (
+                  <div className="space-y-4">
+                    <div className="space-y-2 relative group">
+                      <div className="flex justify-between items-end mb-1">
+                        <label className="text-sm font-bold text-gray-700">
+                          1. Fisiologica
+                        </label>
+                        <TemplateSelector
+                          templates={allTemplates.filter(
+                            (t) =>
+                              t.category === visitData.tipo &&
+                              t.section === "anamnesi",
+                          )}
+                          onSelect={(t) =>
+                            handleTemplateSelect("anamnesiFisiologica", t)
+                          }
+                        />
+                      </div>
+                      <Textarea
+                        value={visitData.anamnesiFisiologica}
+                        onValueChange={(value) =>
+                          handleInputChange("anamnesiFisiologica", value)
+                        }
+                        variant="bordered"
+                        minRows={2}
+                        classNames={{
+                          input: "text-base leading-relaxed",
+                          inputWrapper:
+                            "group-hover:border-primary transition-colors bg-white",
+                        }}
+                      />
+                    </div>
+
+                    <div className="space-y-2 relative group">
+                      <div className="flex justify-between items-end mb-1">
+                        <label className="text-sm font-bold text-gray-700">
+                          2. Patologica remota
+                        </label>
+                        <TemplateSelector
+                          templates={allTemplates.filter(
+                            (t) =>
+                              t.category === visitData.tipo &&
+                              t.section === "anamnesi",
+                          )}
+                          onSelect={(t) =>
+                            handleTemplateSelect(
+                              "anamnesiPatologicaRemota",
+                              t,
+                            )
+                          }
+                        />
+                      </div>
+                      <Textarea
+                        value={visitData.anamnesiPatologicaRemota}
+                        onValueChange={(value) =>
+                          handleInputChange(
+                            "anamnesiPatologicaRemota",
+                            value,
+                          )
+                        }
+                        variant="bordered"
+                        minRows={2}
+                        classNames={{
+                          input: "text-base leading-relaxed",
+                          inputWrapper:
+                            "group-hover:border-primary transition-colors bg-white",
+                        }}
+                      />
+                    </div>
+
+                    <div className="space-y-2 relative group">
+                      <div className="flex justify-between items-end mb-1">
+                        <label className="text-sm font-bold text-gray-700">
+                          3. Prossima
+                        </label>
+                        <TemplateSelector
+                          templates={allTemplates.filter(
+                            (t) =>
+                              t.category === visitData.tipo &&
+                              t.section === "anamnesi",
+                          )}
+                          onSelect={(t) =>
+                            handleTemplateSelect("anamnesiProssima", t)
+                          }
+                        />
+                      </div>
+                      <Textarea
+                        value={visitData.anamnesiProssima}
+                        onValueChange={(value) =>
+                          handleInputChange("anamnesiProssima", value)
+                        }
+                        variant="bordered"
+                        minRows={2}
+                        classNames={{
+                          input: "text-base leading-relaxed",
+                          inputWrapper:
+                            "group-hover:border-primary transition-colors bg-white",
+                        }}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-2 relative group">
+                    <div className="flex justify-between items-end mb-1">
+                      <label className="text-sm font-bold text-gray-700">
+                        1. Anamnesi
+                      </label>
+                      <TemplateSelector
+                        templates={allTemplates.filter(
+                          (t) =>
+                            t.category === visitData.tipo &&
+                            t.section === "anamnesi",
+                        )}
+                        onSelect={(t) => handleTemplateSelect("anamnesi", t)}
+                      />
+                    </div>
+                    <Textarea
+                      value={visitData.anamnesi}
+                      onValueChange={(value) =>
+                        handleInputChange("anamnesi", value)
+                      }
+                      variant="bordered"
+                      minRows={3}
+                      classNames={{
+                        input: "text-base leading-relaxed",
+                        inputWrapper:
+                          "group-hover:border-primary transition-colors bg-white",
+                      }}
                     />
                   </div>
-                  <Textarea
-                    value={visitData.anamnesi}
-                    onValueChange={(value) =>
-                      handleInputChange("anamnesi", value)
-                    }
-                    variant="bordered"
-                    minRows={3}
-                    classNames={{
-                      input: "text-base leading-relaxed",
-                      inputWrapper:
-                        "group-hover:border-primary transition-colors bg-white",
-                    }}
-                  />
-                </div>
+                )}
 
-                {/* 2. Descrizione Problema / Dati Clinici */}
+                {/* Descrizione Problema / Dati Clinici (numerazione dinamica) */}
                 <div className="space-y-2 group">
                   <label className="text-sm font-bold text-gray-700 block mb-1">
-                    2. Descrizione Problema / Dati Clinici
+                    {pediatriaAnamnesiSplit
+                      ? "4. Patologica prossima"
+                      : "2. Patologica prossima"}
                   </label>
                   <Textarea
                     value={visitData.descrizioneClinica}
@@ -1054,11 +1452,11 @@ export default function AddVisit() {
                   />
                 </div>
 
-                {/* 3. Visita */}
+                {/* Visita (numerazione dinamica) */}
                 <div className="space-y-2 relative group">
                   <div className="flex justify-between items-end mb-1">
                     <label className="text-sm font-bold text-gray-700">
-                      3. Visita
+                      {pediatriaAnamnesiSplit ? "5. Visita" : "3. Visita"}
                     </label>
                     <TemplateSelector
                       templates={allTemplates.filter(
@@ -1086,11 +1484,13 @@ export default function AddVisit() {
                   />
                 </div>
 
-                {/* 4. Conclusioni e Terapie */}
+                {/* Conclusioni e Terapie (numerazione dinamica) */}
                 <div className="space-y-2 relative group">
                   <div className="flex justify-between items-end mb-1">
                     <label className="text-sm font-bold text-gray-700">
-                      4. Conclusioni e Terapie
+                      {pediatriaAnamnesiSplit
+                        ? "6. Conclusioni e Terapie"
+                        : "4. Conclusioni e Terapie"}
                     </label>
                     <TemplateSelector
                       templates={allTemplates.filter(
@@ -1164,52 +1564,6 @@ export default function AddVisit() {
           </div>
         </div>
       </div>
-
-      {fullscreenImage && (
-        <div
-          className="fixed inset-0 z-[200] flex items-center justify-center p-6"
-          onClick={() => setFullscreenImage(null)}
-        >
-          <div className="relative" onClick={(e) => e.stopPropagation()}>
-            <button
-              type="button"
-              className="absolute top-3 right-3 z-10 rounded-full bg-white/95 border border-gray-200 text-gray-700 p-2 shadow-md hover:bg-white"
-              onClick={() => setFullscreenImage(null)}
-            >
-              <X size={18} />
-            </button>
-            <img
-              src={fullscreenImage}
-              alt="Ingrandimento"
-              className="max-w-[92vw] max-h-[92vh] object-contain rounded-2xl border border-gray-200 bg-white p-1 shadow-2xl"
-            />
-          </div>
-        </div>
-      )}
-
-      <Modal
-        isOpen={isIncludeImagesModalOpen}
-        onClose={() => resolveIncludeImages(false)}
-      >
-        <ModalContent>
-          <ModalHeader>Includere immagini?</ModalHeader>
-          <ModalBody>
-            <p className="text-sm text-gray-600">
-              Sono presenti{" "}
-              <span className="font-semibold">{includeImagesCount}</span>{" "}
-              immagini nella visita. Vuoi inserirle nel PDF di stampa?
-            </p>
-          </ModalBody>
-          <ModalFooter>
-            <Button variant="light" onPress={() => resolveIncludeImages(false)}>
-              No
-            </Button>
-            <Button color="primary" onPress={() => resolveIncludeImages(true)}>
-              Si, includi
-            </Button>
-          </ModalFooter>
-        </ModalContent>
-      </Modal>
     </div>
   );
 }
