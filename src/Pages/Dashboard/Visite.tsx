@@ -138,9 +138,7 @@ export default function Visite() {
 
   const getVisitTypeLabel = (tipo?: Visit["tipo"]) => {
     if (tipo === "bilancio_salute") return "Visita pediatrica";
-    if (tipo === "patologia") return "Patologia";
     if (tipo === "controllo") return "Controllo";
-    if (tipo === "urgenza") return "Urgenza";
     return "Generale";
   };
 
@@ -207,7 +205,6 @@ export default function Visite() {
               <SelectItem key="tutti">Tutti</SelectItem>
               <SelectItem key="bilancio_salute">Visita pediatrica</SelectItem>
               <SelectItem key="controllo">Controllo</SelectItem>
-              <SelectItem key="urgenza">Urgenza</SelectItem>
             </Select>
             <Input
               type="date"
@@ -259,13 +256,7 @@ export default function Visite() {
                       size="sm"
                       variant="flat"
                       color={
-                        visit.tipo === "bilancio_salute"
-                          ? "success"
-                          : visit.tipo === "patologia"
-                            ? "danger"
-                            : visit.tipo === "urgenza"
-                              ? "warning"
-                              : "primary"
+                        visit.tipo === "bilancio_salute" ? "success" : "primary"
                       }
                       className="capitalize"
                     >
@@ -353,11 +344,7 @@ export default function Visite() {
                     color={
                       selectedVisit.tipo === "bilancio_salute"
                         ? "success"
-                        : selectedVisit.tipo === "patologia"
-                          ? "danger"
-                          : selectedVisit.tipo === "urgenza"
-                            ? "warning"
-                            : "primary"
+                        : "primary"
                     }
                   >
                     {getVisitTypeLabel(selectedVisit.tipo)}

@@ -273,7 +273,23 @@ class LocalStorageFallbackService implements StorageService {
 
   // Visite
   async getVisits(): Promise<Visit[]> {
-    return await this.getFromStorage<Visit>('visits');
+    let visits = await this.getFromStorage<Visit>('visits');
+    // Migrazione: tipi visita rimossi → controllo (dati legacy su disco)
+    if (
+      visits.some(v => {
+        const t = v.tipo as string;
+        return t === 'patologia' || t === 'urgenza';
+      })
+    ) {
+      visits = visits.map(v => {
+        const t = v.tipo as string;
+        return t === 'patologia' || t === 'urgenza'
+          ? { ...v, tipo: 'controllo' as const }
+          : v;
+      });
+      await this.saveToStorage('visits', visits);
+    }
+    return visits;
   }
 
   async getVisitsByPatientId(patientId: string): Promise<Visit[]> {
@@ -424,9 +440,51 @@ class LocalStorageFallbackService implements StorageService {
     return doctor;
   }
 
+  /** Modelli con categorie rimosse (`patologia`, `urgenza`) → `controllo`. */
+  private async migrateLegacyTemplateCategoriesIfNeeded(
+    templates: MedicalTemplate[],
+  ): Promise<MedicalTemplate[]> {
+    if (
+      !templates.some(t => {
+        const c = t.category as string;
+        return c === 'patologia' || c === 'urgenza';
+      })
+    )
+      return templates;
+    const migrated = templates.map(t => {
+      const c = t.category as string;
+      return c === 'patologia' || c === 'urgenza'
+        ? { ...t, category: 'controllo' as const }
+        : t;
+    });
+    await this.saveToStorage('templates', migrated);
+    return migrated;
+  }
+
+  /** Sezione `note` su modelli esame non più usata → `nome` (stesso contenuto). */
+  private async migrateEsameComplementareSectionIfNeeded(
+    templates: MedicalTemplate[],
+  ): Promise<MedicalTemplate[]> {
+    if (
+      !templates.some(
+        t => t.category === 'esame_complementare' && t.section === 'note',
+      )
+    )
+      return templates;
+    const migrated = templates.map(t =>
+      t.category === 'esame_complementare' && t.section === 'note'
+        ? { ...t, section: 'nome' as const }
+        : t,
+    );
+    await this.saveToStorage('templates', migrated);
+    return migrated;
+  }
+
   // Template
   async getTemplates(): Promise<MedicalTemplate[]> {
-    const templates = await this.getFromStorage<MedicalTemplate>('templates');
+    let templates = await this.getFromStorage<MedicalTemplate>('templates');
+    templates = await this.migrateLegacyTemplateCategoriesIfNeeded(templates);
+    templates = await this.migrateEsameComplementareSectionIfNeeded(templates);
     const generateId = () => this.generateId();
 
     const hasObsoleteTemplates = templates.some(t => (t.category as string) === 'ginecologia' || (t.category as string) === 'ostetricia');
@@ -441,20 +499,10 @@ class LocalStorageFallbackService implements StorageService {
       MedicalTemplates.bilancio_salute.esameObiettivo.forEach(t => defaultTemplates.push({ id: generateId(), category: 'bilancio_salute', section: 'esameObiettivo', label: t.label, text: t.text, isDefault: true }));
       MedicalTemplates.bilancio_salute.conclusioni.forEach(t => defaultTemplates.push({ id: generateId(), category: 'bilancio_salute', section: 'conclusioni', label: t.label, text: t.text, isDefault: true }));
 
-      // Patologia
-      MedicalTemplates.patologia.anamnesi.forEach(t => defaultTemplates.push({ id: generateId(), category: 'patologia', section: 'anamnesi', label: t.label, text: t.text, isDefault: true }));
-      MedicalTemplates.patologia.esameObiettivo.forEach(t => defaultTemplates.push({ id: generateId(), category: 'patologia', section: 'esameObiettivo', label: t.label, text: t.text, isDefault: true }));
-      MedicalTemplates.patologia.conclusioni.forEach(t => defaultTemplates.push({ id: generateId(), category: 'patologia', section: 'conclusioni', label: t.label, text: t.text, isDefault: true }));
-
-      // Controllo
+      // Controllo (include ex-modelli patologia/urgenza, unificati qui)
       MedicalTemplates.controllo.anamnesi.forEach(t => defaultTemplates.push({ id: generateId(), category: 'controllo', section: 'anamnesi', label: t.label, text: t.text, isDefault: true }));
       MedicalTemplates.controllo.esameObiettivo.forEach(t => defaultTemplates.push({ id: generateId(), category: 'controllo', section: 'esameObiettivo', label: t.label, text: t.text, isDefault: true }));
       MedicalTemplates.controllo.conclusioni.forEach(t => defaultTemplates.push({ id: generateId(), category: 'controllo', section: 'conclusioni', label: t.label, text: t.text, isDefault: true }));
-
-      // Urgenza
-      MedicalTemplates.urgenza.anamnesi.forEach(t => defaultTemplates.push({ id: generateId(), category: 'urgenza', section: 'anamnesi', label: t.label, text: t.text, isDefault: true }));
-      MedicalTemplates.urgenza.esameObiettivo.forEach(t => defaultTemplates.push({ id: generateId(), category: 'urgenza', section: 'esameObiettivo', label: t.label, text: t.text, isDefault: true }));
-      MedicalTemplates.urgenza.conclusioni.forEach(t => defaultTemplates.push({ id: generateId(), category: 'urgenza', section: 'conclusioni', label: t.label, text: t.text, isDefault: true }));
 
       // Terapie
       MedicalTemplates.terapie.forEach(t => defaultTemplates.push({ id: generateId(), category: 'terapie', section: 'generale', label: t.label, text: t.text, isDefault: true }));

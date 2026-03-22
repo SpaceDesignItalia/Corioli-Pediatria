@@ -372,11 +372,13 @@ export class TemplateService {
   }
 
   static async getTemplatesByCategoryAndSection(
-    category: 'ginecologia' | 'ostetricia' | 'terapie',
-    section: 'prestazione' | 'esameObiettivo' | 'conclusioni' | 'generale'
+    category: MedicalTemplate['category'],
+    section: MedicalTemplate['section'],
   ): Promise<MedicalTemplate[]> {
     const templates = await this.getAllTemplates();
-    return templates.filter(t => t.category === category && t.section === section);
+    return templates.filter(
+      (t) => t.category === category && t.section === section,
+    );
   }
 
   static async addTemplate(templateData: Omit<MedicalTemplate, 'id' | 'isDefault'>): Promise<MedicalTemplate> {

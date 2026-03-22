@@ -35,7 +35,7 @@ export const MedicalTemplates = {
       }
     ]
   },
-  patologia: {
+  controllo: {
     anamnesi: [
       {
         label: "Faringotonsillite",
@@ -48,6 +48,22 @@ export const MedicalTemplates = {
       {
         label: "Gastroenterite",
         text: "Riferisce episodi di vomito (x3 da ieri) e scariche diarroiche (x4). Non febbre. Beve regolarmente."
+      },
+      {
+        label: "Controllo Patologia",
+        text: "Visita di controllo per rivalutazione clinica dopo disturbo intercorrente. Sintomatologia in miglioramento."
+      },
+      {
+        label: "Follow-up Terapia",
+        text: "Paziente si presenta per terminata la terapia antibiotica. Condizioni generali buone."
+      },
+      {
+        label: "Trauma Cranico Minore",
+        text: "Riferisce caduta accidentale con trauma cranico contusivo. Ha pianto subito, non vomito, non perdita di coscienza. Nessuna amnesia."
+      },
+      {
+        label: "Febbre Elevata",
+        text: "Accesso urgente per picco febbrile > 39.5 non responsivo agli antipiretici."
       }
     ],
     esameObiettivo: [
@@ -62,6 +78,14 @@ export const MedicalTemplates = {
       {
         label: "Addome Meteorico ma Trattabile",
         text: "Addome: globoso, meteorico, vivacemente peristaltico ma trattabile, non masse palpabili. Blidner negativo."
+      },
+      {
+        label: "Miglioramento Obiettivo",
+        text: "Faringe rosea, non essudato. Timpani normointroflesi, Rosei. Obiettivita' polmonare negativa."
+      },
+      {
+        label: "E.O. Neurologico Negativo",
+        text: "Paziente vigile e reattivo. Pupille isocoriche e isocicliche, normoreagenti alla luce. Assenza di deficit neurologici a focolaio."
       }
     ],
     conclusioni: [
@@ -72,27 +96,7 @@ export const MedicalTemplates = {
       {
         label: "Idratazione",
         text: "Si raccomanda idratazione orale frazionata. Riposo a casa. Controllo SOS per eventuale persistenza sintomatologia."
-      }
-    ]
-  },
-  controllo: {
-    anamnesi: [
-      {
-        label: "Controllo Patologia",
-        text: "Visita di controllo per rivalutazione clinica dopo disturbo intercorrente. Sintomatologia in miglioramento."
       },
-      {
-        label: "Follow-up Terapia",
-        text: "Paziente si presenta per terminata la terapia antibiotica. Condizioni generali buone."
-      }
-    ],
-    esameObiettivo: [
-      {
-        label: "Miglioramento Obiettivo",
-        text: "Faringe rosea, non essudato. Timpani normointroflesi, Rosei. Obiettivita' polmonare negativa."
-      }
-    ],
-    conclusioni: [
       {
         label: "Risoluzione",
         text: "Risolto episodio infettivo. Restitutio ad integrum."
@@ -100,27 +104,7 @@ export const MedicalTemplates = {
       {
         label: "Prolungamento Terapia",
         text: "Sintomatologia in parziale risoluzione, si consiglia prosieguo della terapia in atto."
-      }
-    ]
-  },
-  urgenza: {
-    anamnesi: [
-      {
-        label: "Trauma Cranico Minore",
-        text: "Riferisce caduta accidentale con trauma cranico contusivo. Ha pianto subito, non vomito, non perdita di coscienza. Nessuna amnesia."
       },
-      {
-        label: "Febbre Elevata",
-        text: "Accesso urgente per picco febbrile > 39.5 non responsivo agli antipiretici."
-      }
-    ],
-    esameObiettivo: [
-      {
-        label: "E.O. Neurologico Negativo",
-        text: "Paziente vigile e reattivo. Pupille isocoriche e isocicliche, normoreagenti alla luce. Assenza di deficit neurologici a focolaio."
-      }
-    ],
-    conclusioni: [
       {
         label: "Osservazione Domiciliare",
         text: "Parametri stabili. Spiegata alla famiglia la necessita' di osservazione domiciliare (risvegliare ogni 3h la notte). In caso di vomito a getto o sopore, raccomandato accesso in Pronto Soccorso."

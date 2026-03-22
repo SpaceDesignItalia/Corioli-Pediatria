@@ -14,6 +14,11 @@ import {
   DropdownMenu,
   DropdownItem,
   Chip,
+  Modal,
+  ModalContent,
+  ModalHeader,
+  ModalBody,
+  useDisclosure,
 } from "@nextui-org/react";
 import { useSearchParams, useNavigate, useParams } from "react-router-dom";
 import {
@@ -25,11 +30,12 @@ import {
 } from "../../services/OfflineServices";
 import { PdfService } from "../../services/PdfService";
 import { Patient, Visit, MedicalTemplate } from "../../types/Storage";
-import { calculateAge } from "../../utils/dateUtils";
+import { calculateAge, parseDateOnlyLocalMs } from "../../utils/dateUtils";
 import {
   computeWhoPercentileAltezza,
   computeWhoPercentilePeso,
 } from "../../utils/whoPercentiles";
+import { backgroundCmTicksEvery20 } from "../../utils/growthChartTicks";
 import {
   ArrowLeft,
   Printer,
@@ -38,6 +44,7 @@ import {
   Save,
   User,
   Copy,
+  Maximize2,
 } from "lucide-react";
 import { useToast } from "../../contexts/ToastContext";
 import { Breadcrumb } from "../../components/Breadcrumb";
@@ -46,6 +53,23 @@ import {
   getDoctorProfileIncompleteMessage,
   isDoctorProfileComplete,
 } from "../../utils/doctorProfile";
+
+/** Come è stata compilata l'anamnesi in questa visita (persistito o euristica legacy). */
+function inferAnamnesiCampiSeparati(visit: Visit): boolean {
+  if (visit.anamnesiCampiSeparati === true) return true;
+  if (visit.anamnesiCampiSeparati === false) return false;
+  const merged = visit.anamnesi || "";
+  if (/1\.\s*Fisiologica|2\.\s*Patologica remota|3\.\s*Prossima/.test(merged)) {
+    return true;
+  }
+  if (
+    visit.anamnesiPatologicaRemota?.trim() ||
+    visit.anamnesiProssima?.trim()
+  ) {
+    return true;
+  }
+  return false;
+}
 
 const TemplateSelector = ({
   templates,
@@ -95,9 +119,7 @@ const createDefaultVisitData = () => ({
   dataVisita: new Date().toISOString().slice(0, 10),
   tipo: "bilancio_salute" as
     | "bilancio_salute"
-    | "patologia"
-    | "controllo"
-    | "urgenza",
+    | "controllo",
   descrizioneClinica: "",
   anamnesi: "",
   anamnesiFisiologica: "",
@@ -142,10 +164,10 @@ const GrowthChart = ({
   arrivalPoint?: GrowthPoint;
 }) => {
   const WIDTH = 520;
-  const HEIGHT = 220;
-  const PAD_X = 42;
-  const PAD_TOP = 24;
-  const PAD_BOTTOM = 38;
+  const HEIGHT = 248;
+  const PAD_X = 40;
+  const PAD_TOP = 20;
+  const PAD_BOTTOM = 40;
 
   if (!points || points.length === 0) {
     return (
@@ -158,25 +180,75 @@ const GrowthChart = ({
   const allX = arrivalPoint ? [...points.map((p) => p.x), arrivalPoint.x] : points.map((p) => p.x);
   const allY = arrivalPoint ? [...points.map((p) => p.y), arrivalPoint.y] : points.map((p) => p.y);
 
-  const minX = Math.min(...allX);
-  const maxX = Math.max(...allX);
-  const rawMinY = Math.min(...allY);
-  const rawMaxY = Math.max(...allY);
+  const minXRaw = Math.min(...allX);
+  const maxXRaw = Math.max(...allX);
+  
+  // Padding X (circa 1 mese in ms)
+  const paddingX = 30 * 24 * 60 * 60 * 1000;
+  const minX = minXRaw === maxXRaw ? minXRaw - paddingX : minXRaw - paddingX;
+  const maxX = minXRaw === maxXRaw ? minXRaw + paddingX : maxXRaw + paddingX;
 
+  const minYRaw = Math.min(...allY);
+  const maxYRaw = Math.max(...allY);
+
+  // Bounds asse Y dinamico (step da 5 o 10 cm)
+  const spanYRaw = Math.max(10, maxYRaw - minYRaw);
+  const stepY = spanYRaw > 40 ? 10 : 5;
+  let minY = Math.floor((minYRaw - spanYRaw * 0.1) / stepY) * stepY;
+  let maxY = Math.ceil((maxYRaw + spanYRaw * 0.1) / stepY) * stepY;
+  if (minY === maxY) {
+      minY -= stepY;
+      maxY += stepY;
+  }
+  
+  const spanY2 = maxY - minY;
   const spanX = Math.max(1, maxX - minX);
-  const spanY = Math.max(1, rawMaxY - rawMinY);
-
-  const minY = rawMinY - spanY * 0.1;
-  const maxY = rawMaxY + spanY * 0.1;
 
   const xScale = (x: number) => PAD_X + ((x - minX) / spanX) * (WIDTH - PAD_X * 2);
   const yScale = (y: number) =>
-    HEIGHT - PAD_BOTTOM - ((y - minY) / (maxY - minY)) * (HEIGHT - PAD_TOP - PAD_BOTTOM);
+    HEIGHT - PAD_BOTTOM - ((y - minY) / spanY2) * (HEIGHT - PAD_TOP - PAD_BOTTOM);
 
-  const poly = points.map((p) => `${xScale(p.x)},${yScale(p.y)}`).join(" ");
+  const sortedPoints = [...points].sort((a, b) => a.x - b.x);
+  const poly = sortedPoints.map((p) => `${xScale(p.x)},${yScale(p.y)}`).join(" ");
 
-  const first = points[0];
-  const last = points[points.length - 1];
+  const fmtDateShort = (ts: number) => {
+    const d = new Date(ts);
+    if (!Number.isFinite(d.getTime())) return "";
+    const day = String(d.getDate()).padStart(2, "0");
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const year = String(d.getFullYear()).slice(-2);
+    return `${day}/${month}/${year}`;
+  };
+  
+  const fmtDateFull = (ts: number) => {
+    const d = new Date(ts);
+    if (!Number.isFinite(d.getTime())) return "";
+    const day = String(d.getDate()).padStart(2, "0");
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const year = String(d.getFullYear());
+    return `${day}/${month}/${year}`;
+  };
+
+  const backgroundYVals = [];
+  for (let yVal = minY; yVal <= maxY; yVal += stepY) {
+    backgroundYVals.push(yVal);
+  }
+  
+  const xSegments = Array.from({ length: 5 }).map((_, i) => minX + (spanX * i) / 4);
+
+  const tickXs = [...new Set(sortedPoints.map(p => p.x))];
+  const manyDates = tickXs.length > 5;
+
+  const placedLabels: { x: number; y: number; w: number; h: number }[] = [];
+  const checkCollision = (nx: number, ny: number, nw: number, nh: number) => {
+    const padX = 10;
+    const padY = 8;
+    for (const l of placedLabels) {
+      if (nx < l.x + l.w + padX && nx + nw + padX > l.x &&
+          ny < l.y + l.h + padY && ny + nh + padY > l.y) return true;
+    }
+    return false;
+  };
 
   return (
     <div className="w-full">
@@ -196,107 +268,232 @@ const GrowthChart = ({
           stroke="#E5E7EB"
         />
 
-        {/* Griglia + etichette assi (Y in cm, X in date) */}
-        {Array.from({ length: 5 }).map((_, i) => {
-          const t = i / 4; // 0..1
-          const yPos = PAD_TOP + (HEIGHT - PAD_TOP - PAD_BOTTOM) * t;
-          // In alto devono comparire i cm maggiori, in basso i minori.
-          const yVal = maxY - (maxY - minY) * t;
+        <text
+          x={PAD_X - 6}
+          y={PAD_TOP - 6}
+          textAnchor="end"
+          fontSize="9"
+          fontStyle="italic"
+          fill="#6B7280"
+        >
+          cm
+        </text>
+
+        {/* Griglia Orizzontale */}
+        {backgroundYVals.map((yVal, i) => {
+          const yPos = yScale(yVal);
           return (
-            <g key={`y-${i}`}>
+            <React.Fragment key={`bg-h-${i}`}>
               <line
                 x1={PAD_X}
                 x2={WIDTH - PAD_X}
                 y1={yPos}
                 y2={yPos}
-                stroke="#F3F4F6"
+                stroke="#E5E7EB"
                 strokeWidth="1"
               />
               <text
-                x={PAD_X - 8}
-                y={yPos + 3}
+                x={PAD_X - 6}
+                y={yPos + 3.5}
                 textAnchor="end"
                 fontSize="10"
-                fontWeight="600"
-                fill="#374151"
+                fill="#4B5563"
+                style={{ pointerEvents: "none" }}
               >
-                {Number.isFinite(yVal) ? `${Math.round(yVal)} cm` : ""}
+                {yVal}
               </text>
-            </g>
+            </React.Fragment>
           );
         })}
 
-        {Array.from({ length: 4 }).map((_, i) => {
-          const t = i / 3; // 0..1
-          const ts = minX + (maxX - minX) * t;
-          const xPos = xScale(ts);
-          const label = new Date(ts).toLocaleDateString("it-IT", {
-            day: "2-digit",
-            month: "2-digit",
-            year: "2-digit",
-          });
+        {/* Griglia Verticale */}
+        {xSegments.map((t, i) => {
+          const xPos = xScale(t);
           return (
-            <g key={`x-${i}`}>
+            <line
+              key={`bg-v-${i}`}
+              x1={xPos}
+              x2={xPos}
+              y1={PAD_TOP}
+              y2={HEIGHT - PAD_BOTTOM}
+              stroke="#E5E7EB"
+              strokeWidth="1"
+            />
+          );
+        })}
+
+        {/* Cornice Assi */}
+        <line x1={PAD_X} y1={PAD_TOP} x2={PAD_X} y2={HEIGHT - PAD_BOTTOM} stroke="#4B5563" strokeWidth="1.5" />
+        <line x1={PAD_X} y1={HEIGHT - PAD_BOTTOM} x2={WIDTH - PAD_X} y2={HEIGHT - PAD_BOTTOM} stroke="#4B5563" strokeWidth="1.5" />
+
+        {/* Linee di connessione con VC (Velocità di Crescita) */}
+        {sortedPoints.map((p, idx) => {
+          if (idx === 0) return null;
+          const prev = sortedPoints[idx - 1];
+          const msPerYear = 1000 * 60 * 60 * 24 * 365.25;
+          const yearsDiff = (p.x - prev.x) / msPerYear;
+          let vcLabel = "";
+          if (yearsDiff > 0.08) { // mostriamo VC solo se è passato almeno ~1 mese
+            const vc = (p.y - prev.y) / yearsDiff;
+            vcLabel = `${vc.toFixed(1)} cm/anno`;
+          }
+
+          const cx1 = xScale(prev.x);
+          const cy1 = yScale(prev.y);
+          const cx2 = xScale(p.x);
+          const cy2 = yScale(p.y);
+          const midX = (cx1 + cx2) / 2;
+          const midY = (cy1 + cy2) / 2;
+
+          return (
+            <React.Fragment key={`segment-${idx}`}>
               <line
-                x1={xPos}
-                x2={xPos}
-                y1={PAD_TOP}
-                y2={HEIGHT - PAD_BOTTOM}
-                stroke="#F3F4F6"
-                strokeWidth="1"
+                x1={cx1}
+                y1={cy1}
+                x2={cx2}
+                y2={cy2}
+                stroke="#1F2937"
+                strokeWidth="2.5"
+                strokeLinejoin="round"
+                strokeLinecap="round"
               />
+              {vcLabel && (
+                <text
+                  x={midX}
+                  y={midY - 8}
+                  textAnchor="middle"
+                  fontSize="8"
+                  fill="#4B5563"
+                  style={{ pointerEvents: "none" }}
+                >
+                  {vcLabel}
+                </text>
+              )}
+            </React.Fragment>
+          );
+        })}
+
+        {/* Linea Target */}
+        {arrivalPoint && sortedPoints.length > 0 && (
+          <line
+            x1={xScale(sortedPoints[sortedPoints.length - 1].x)}
+            y1={yScale(sortedPoints[sortedPoints.length - 1].y)}
+            x2={xScale(arrivalPoint.x)}
+            y2={yScale(arrivalPoint.y)}
+            stroke="#6B7280"
+            strokeWidth="1.5"
+            strokeDasharray="4 4"
+          />
+        )}
+
+        {/* Punti e Label Altezza */}
+        {sortedPoints.map((p, idx) => {
+          const cx = xScale(p.x);
+          const cy = yScale(p.y);
+          
+          const label = `${p.y}`;
+          const lw = label.length * 6;
+          const lh = 12;
+          const offsets = [
+            { dx: 0, dy: -10 },
+            { dx: 0, dy: 14 },
+            { dx: 14, dy: 3 },
+            { dx: -14, dy: 3 },
+            { dx: 10, dy: -8 },
+            { dx: -10, dy: -8 },
+            { dx: 10, dy: 12 },
+            { dx: -10, dy: 12 }
+          ];
+          
+          let finalX = cx;
+          let finalY = cy - 10;
+          for (const off of offsets) {
+            const nx = cx + off.dx - lw/2;
+            const ny = cy + off.dy - lh/2;
+            if (!checkCollision(nx, ny, lw, lh)) {
+              placedLabels.push({ x: nx, y: ny, w: lw, h: lh });
+              finalX = cx + off.dx;
+              finalY = cy + off.dy;
+              break;
+            }
+          }
+
+          return (
+            <React.Fragment key={`point-${idx}`}>
+              {/* Linea verticale verso l'asse X */}
+              <line
+                x1={cx}
+                y1={cy}
+                x2={cx}
+                y2={HEIGHT - PAD_BOTTOM}
+                stroke="#D1D5DB"
+                strokeWidth="1.5"
+                strokeDasharray="2 2"
+              />
+              
+              <circle
+                cx={cx}
+                cy={cy}
+                r="4.5"
+                fill="#F8FAFC"
+                stroke="#111827"
+                strokeWidth="2"
+              >
+                <title>{`${fmtDateFull(p.x)} - ${p.y} cm`}</title>
+              </circle>
+              
               <text
-                x={xPos}
-                y={HEIGHT - PAD_BOTTOM + 16}
-                textAnchor={i === 0 ? "start" : i === 3 ? "end" : "middle"}
-                fontSize="10"
-                fontWeight="600"
-                fill="#374151"
+                x={finalX}
+                y={finalY}
+                textAnchor="middle"
+                fontSize="11"
+                fontWeight="bold"
+                fill="#111827"
+                style={{ pointerEvents: "none" }}
               >
                 {label}
               </text>
-            </g>
+              
+              <text
+                x={cx}
+                y={HEIGHT - PAD_BOTTOM + (manyDates ? 12 : 14)}
+                textAnchor={manyDates ? "end" : "middle"}
+                fontSize="9"
+                fill="#4B5563"
+                transform={manyDates ? `rotate(-35 ${cx} ${HEIGHT - PAD_BOTTOM + 12})` : undefined}
+                style={{ pointerEvents: "none" }}
+              >
+                {fmtDateShort(p.x)}
+              </text>
+            </React.Fragment>
           );
         })}
 
-        <polyline
-          points={poly}
-          fill="none"
-          stroke="#2563EB"
-          strokeWidth="2.5"
-          strokeLinejoin="round"
-          strokeLinecap="round"
-        />
-
-        {points.map((p, idx) => (
-          <circle
-            key={`${p.x}-${idx}`}
-            cx={xScale(p.x)}
-            cy={yScale(p.y)}
-            r="4.2"
-            fill="#2563EB"
-            stroke="white"
-            strokeWidth="2"
-          />
-        ))}
-
+        {/* Target Marker */}
         {arrivalPoint && (
-          (() => {
-            const cx = xScale(arrivalPoint.x);
-            const cy = yScale(arrivalPoint.y);
-            // Diamante per evidenziare il target (altezza stimata)
-            return (
-              <polygon
-                points={`${cx},${cy - 6} ${cx + 6},${cy} ${cx},${cy + 6} ${cx - 6},${cy}`}
-                fill="#16A34A"
-                stroke="white"
-                strokeWidth="2"
-              />
-            );
-          })()
+          <React.Fragment>
+            <polygon
+              points={`${xScale(arrivalPoint.x)},${yScale(arrivalPoint.y) - 6} ${xScale(arrivalPoint.x) + 6},${yScale(arrivalPoint.y)} ${xScale(arrivalPoint.x)},${yScale(arrivalPoint.y) + 6} ${xScale(arrivalPoint.x) - 6},${yScale(arrivalPoint.y)}`}
+              fill="#F3F4F6"
+              stroke="#111827"
+              strokeWidth="2"
+            >
+                <title>{`Target genetico: ${arrivalPoint.y} cm`}</title>
+            </polygon>
+            <text
+              x={xScale(arrivalPoint.x)}
+              y={yScale(arrivalPoint.y) - 10}
+              textAnchor="middle"
+              fontSize="10"
+              fontWeight="bold"
+              fill="#111827"
+              style={{ pointerEvents: "none" }}
+            >
+              Target gen. {arrivalPoint.y} cm
+            </text>
+          </React.Fragment>
         )}
       </svg>
-
     </div>
   );
 };
@@ -306,6 +503,7 @@ export default function AddVisit() {
   const { visitId } = useParams<{ visitId: string }>();
   const navigate = useNavigate();
   const { showToast } = useToast();
+  const { isOpen: isChartOpen, onOpen: onOpenChart, onClose: onCloseChart } = useDisclosure();
 
   const [patient, setPatient] = useState<Patient | null>(null);
   const [patientVisits, setPatientVisits] = useState<Visit[]>([]);
@@ -333,16 +531,18 @@ export default function AddVisit() {
   );
 
   useEffect(() => {
-    // Preferenze locali per abilitare/disabilitare l'anamnesi in campi separati
+    // Nuova visita: preferenza globale. In modifica visita il layout è quello salvato sulla visita.
     PreferenceService.getPreferences()
       .then((prefs) => {
         if (!prefs) return;
-        setPediatriaAnamnesiSplit(Boolean(prefs.pediatriaAnamnesiSplit));
+        if (!visitId) {
+          setPediatriaAnamnesiSplit(Boolean(prefs.pediatriaAnamnesiSplit));
+        }
       })
       .catch(() => {
         // In caso di errore usiamo il valore di default
       });
-  }, []);
+  }, [visitId]);
 
   useEffect(() => {
     const loadData = async () => {
@@ -386,15 +586,24 @@ export default function AddVisit() {
           const visit = await VisitService.getVisitById(visitId);
           if (visit) {
             setExistingVisit(visit);
+            const usaCampiSeparati = inferAnamnesiCampiSeparati(visit);
+            setPediatriaAnamnesiSplit(usaCampiSeparati);
             setVisitData({
               dataVisita: visit.dataVisita,
               tipo: (visit.tipo as any) || "bilancio_salute",
               descrizioneClinica: visit.descrizioneClinica || "",
               anamnesi: visit.anamnesi || "",
-              anamnesiFisiologica:
-                visit.anamnesiFisiologica || visit.anamnesi || "",
-              anamnesiPatologicaRemota: visit.anamnesiPatologicaRemota || "",
-              anamnesiProssima: visit.anamnesiProssima || "",
+              ...(usaCampiSeparati
+                ? {
+                    anamnesiFisiologica: visit.anamnesiFisiologica ?? "",
+                    anamnesiPatologicaRemota: visit.anamnesiPatologicaRemota ?? "",
+                    anamnesiProssima: visit.anamnesiProssima ?? "",
+                  }
+                : {
+                    anamnesiFisiologica: "",
+                    anamnesiPatologicaRemota: "",
+                    anamnesiProssima: "",
+                  }),
               esamiObiettivo: visit.esamiObiettivo || "",
               conclusioniDiagnostiche: [
                 visit.conclusioniDiagnostiche,
@@ -585,13 +794,18 @@ export default function AddVisit() {
         conclusioniDiagnostiche: visitData.conclusioniDiagnostiche,
         terapie: "",
         tipo: visitData.tipo as any,
+        anamnesiCampiSeparati: pediatriaAnamnesiSplit,
         ...(pediatriaAnamnesiSplit
           ? {
               anamnesiFisiologica: visitData.anamnesiFisiologica,
               anamnesiPatologicaRemota: visitData.anamnesiPatologicaRemota,
               anamnesiProssima: visitData.anamnesiProssima,
             }
-          : {}),
+          : {
+              anamnesiFisiologica: "",
+              anamnesiPatologicaRemota: "",
+              anamnesiProssima: "",
+            }),
         pediatria: pediatriaData,
       };
 
@@ -664,16 +878,23 @@ export default function AddVisit() {
       return;
     }
 
+    const usaSep = inferAnamnesiCampiSeparati(previousVisit);
+    setPediatriaAnamnesiSplit(usaSep);
     setVisitData((prev) => ({
       ...prev,
       descrizioneClinica: previousVisit.descrizioneClinica || "",
       anamnesi: previousVisit.anamnesi || "",
-      anamnesiFisiologica:
-        (previousVisit as any).anamnesiFisiologica || previousVisit.anamnesi || "",
-      anamnesiPatologicaRemota:
-        (previousVisit as any).anamnesiPatologicaRemota || "",
-      anamnesiProssima:
-        (previousVisit as any).anamnesiProssima || "",
+      ...(usaSep
+        ? {
+            anamnesiFisiologica: previousVisit.anamnesiFisiologica ?? "",
+            anamnesiPatologicaRemota: previousVisit.anamnesiPatologicaRemota ?? "",
+            anamnesiProssima: previousVisit.anamnesiProssima ?? "",
+          }
+        : {
+            anamnesiFisiologica: "",
+            anamnesiPatologicaRemota: "",
+            anamnesiProssima: "",
+          }),
       esamiObiettivo: previousVisit.esamiObiettivo || "",
       conclusioniDiagnostiche: previousVisit.conclusioniDiagnostiche || "",
       terapie: previousVisit.terapie || "",
@@ -844,11 +1065,14 @@ export default function AddVisit() {
     hasPreviousVisitForCurrentType || copiedPreviousType === visitData.tipo;
 
   const growthPoints = (() => {
+    /** Solo misure fino alla data di questo referto (non visite successive) */
+    const limitDay = visitData.dataVisita?.slice(0, 10) || "";
     const saved = patientVisits
       .filter((v) => v.pediatria?.altezza != null)
       .filter((v) => !existingVisit || v.id !== existingVisit.id)
+      .filter((v) => (v.dataVisita?.slice(0, 10) || "") <= limitDay)
       .map((v) => ({
-        x: new Date(v.dataVisita).getTime(),
+        x: parseDateOnlyLocalMs(v.dataVisita),
         y: v.pediatria?.altezza as number,
       }));
 
@@ -856,7 +1080,7 @@ export default function AddVisit() {
       pediatriaData.altezza != null
         ? [
             {
-              x: new Date(visitData.dataVisita).getTime(),
+              x: parseDateOnlyLocalMs(visitData.dataVisita),
               y: pediatriaData.altezza as number,
             },
           ]
@@ -870,7 +1094,7 @@ export default function AddVisit() {
   const arrivalPoint = (() => {
     const manualEst = pediatriaData.altezzaStimataFigli;
     if (manualEst != null && Number.isFinite(manualEst)) {
-      const x = new Date(visitData.dataVisita).getTime() + 1;
+      const x = parseDateOnlyLocalMs(visitData.dataVisita) + 1;
       return { x, y: Number(manualEst.toFixed(1)) };
     }
 
@@ -890,7 +1114,7 @@ export default function AddVisit() {
     const est = patient.sesso === "M" ? (sum + 13) / 2 : (sum - 13) / 2;
     if (!Number.isFinite(est)) return undefined;
 
-    const x = new Date(visitData.dataVisita).getTime() + 1; // spostato di poco per non sovrapporsi all’ultimo punto
+    const x = parseDateOnlyLocalMs(visitData.dataVisita) + 1; // spostato di poco per non sovrapporsi all’ultimo punto
     return { x, y: Number(est.toFixed(1)) };
   })();
 
@@ -999,9 +1223,6 @@ export default function AddVisit() {
           }}
         >
           <Tab key="bilancio_salute" title="Visita pediatrica" />
-          {isEditMode && visitData.tipo === "patologia" && (
-            <Tab key="patologia" title="Visita per Patologia" />
-          )}
           <Tab key="controllo" title="Visita di Controllo" />
         </Tabs>
 
@@ -1031,42 +1252,42 @@ export default function AddVisit() {
                         step="0.01"
                       />
                       <div className="relative">
-                          <Input
-                            type="text"
-                            label="Percentile Peso"
-                            value={pediatriaData.percentilePeso}
-                            variant="bordered"
-                            size="sm"
-                            labelPlacement="outside"
-                            placeholder="es. 50"
-                            onValueChange={(v) => {
-                              const trimmed = (v ?? "").toString().trim();
-                              setIsPercentilePesoManual(trimmed.length > 0);
-                              handlePediatriaChange(
-                                "percentilePeso",
-                                trimmed.length > 0 ? v : "",
-                              );
-                            }}
-                          />
-                          {percentilePesoSuggested && (
-                            <div className="absolute right-0 -top-0.5 z-10">
-                              <Chip
-                                size="sm"
-                                color="primary"
-                                variant="flat"
-                                className="cursor-pointer hover:bg-primary/20 h-6 px-1"
-                                onClick={() => {
-                                  setIsPercentilePesoManual(true);
-                                  handlePediatriaChange(
-                                    "percentilePeso",
-                                    percentilePesoSuggested,
-                                  );
-                                }}
-                              >
-                                Suggerito: {percentilePesoSuggested}°
-                              </Chip>
-                            </div>
-                          )}
+                        <Input
+                          type="text"
+                          label="Percentile Peso"
+                          value={pediatriaData.percentilePeso}
+                          variant="bordered"
+                          size="sm"
+                          labelPlacement="outside"
+                          placeholder="es. 50"
+                          onValueChange={(v) => {
+                            const trimmed = (v ?? "").toString().trim();
+                            setIsPercentilePesoManual(trimmed.length > 0);
+                            handlePediatriaChange(
+                              "percentilePeso",
+                              trimmed.length > 0 ? v : "",
+                            );
+                          }}
+                        />
+                        {percentilePesoSuggested && (
+                          <div className="absolute right-0 -top-0.5 z-10">
+                            <Chip
+                              size="sm"
+                              color="primary"
+                              variant="flat"
+                              className="cursor-pointer hover:bg-primary/20 h-6 px-1"
+                              onClick={() => {
+                                setIsPercentilePesoManual(true);
+                                handlePediatriaChange(
+                                  "percentilePeso",
+                                  percentilePesoSuggested,
+                                );
+                              }}
+                            >
+                              Suggerito: {percentilePesoSuggested}°
+                            </Chip>
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -1085,42 +1306,42 @@ export default function AddVisit() {
                         step="0.1"
                       />
                       <div className="relative">
-                          <Input
-                            type="text"
-                            label="Percentile Altezza"
-                            value={pediatriaData.percentileAltezza}
-                            variant="bordered"
-                            size="sm"
-                            labelPlacement="outside"
-                            placeholder="es. 50"
-                            onValueChange={(v) => {
-                              const trimmed = (v ?? "").toString().trim();
-                              setIsPercentileAltezzaManual(trimmed.length > 0);
-                              handlePediatriaChange(
-                                "percentileAltezza",
-                                trimmed.length > 0 ? v : "",
-                              );
-                            }}
-                          />
-                          {percentileAltezzaSuggested && (
-                            <div className="absolute right-0 -top-0.5 z-10">
-                              <Chip
-                                size="sm"
-                                color="primary"
-                                variant="flat"
-                                className="cursor-pointer hover:bg-primary/20 h-6 px-1"
-                                onClick={() => {
-                                  setIsPercentileAltezzaManual(true);
-                                  handlePediatriaChange(
-                                    "percentileAltezza",
-                                    percentileAltezzaSuggested,
-                                  );
-                                }}
-                              >
-                                Suggerito: {percentileAltezzaSuggested}°
-                              </Chip>
-                            </div>
-                          )}
+                        <Input
+                          type="text"
+                          label="Percentile Altezza"
+                          value={pediatriaData.percentileAltezza}
+                          variant="bordered"
+                          size="sm"
+                          labelPlacement="outside"
+                          placeholder="es. 50"
+                          onValueChange={(v) => {
+                            const trimmed = (v ?? "").toString().trim();
+                            setIsPercentileAltezzaManual(trimmed.length > 0);
+                            handlePediatriaChange(
+                              "percentileAltezza",
+                              trimmed.length > 0 ? v : "",
+                            );
+                          }}
+                        />
+                        {percentileAltezzaSuggested && (
+                          <div className="absolute right-0 -top-0.5 z-10">
+                            <Chip
+                              size="sm"
+                              color="primary"
+                              variant="flat"
+                              className="cursor-pointer hover:bg-primary/20 h-6 px-1"
+                              onClick={() => {
+                                setIsPercentileAltezzaManual(true);
+                                handlePediatriaChange(
+                                  "percentileAltezza",
+                                  percentileAltezzaSuggested,
+                                );
+                              }}
+                            >
+                              Suggerito: {percentileAltezzaSuggested}°
+                            </Chip>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </>
@@ -1284,8 +1505,16 @@ export default function AddVisit() {
                 Grafico andamento crescita
               </CardHeader>
               <CardBody className="px-4 py-4">
-                {/* Il grafico usa le altezze salvate nelle visite del paziente */}
-                <GrowthChart points={growthPoints} arrivalPoint={arrivalPoint} />
+                <div 
+                  className="relative group cursor-pointer transition-transform hover:scale-[1.01]" 
+                  onClick={onOpenChart}
+                  title="Clicca per ingrandire"
+                >
+                  <GrowthChart points={growthPoints} arrivalPoint={arrivalPoint} />
+                  <div className="absolute top-2 right-2 p-1.5 bg-white shadow-sm border border-default-200 rounded-md opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Maximize2 size={16} className="text-gray-700" />
+                  </div>
+                </div>
               </CardBody>
             </Card>
           </div>
@@ -1564,6 +1793,21 @@ export default function AddVisit() {
           </div>
         </div>
       </div>
+
+      {/* Chart Modal */}
+      <Modal isOpen={isChartOpen} onClose={onCloseChart} size="4xl" placement="center">
+        <ModalContent>
+          {(onClose) => (
+            <>
+              <ModalHeader className="flex flex-col gap-1">Grafico andamento crescita</ModalHeader>
+              <ModalBody className="pb-6">
+                <GrowthChart points={growthPoints} arrivalPoint={arrivalPoint} />
+              </ModalBody>
+            </>
+          )}
+        </ModalContent>
+      </Modal>
+
     </div>
   );
 }

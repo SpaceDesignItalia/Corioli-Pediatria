@@ -60,10 +60,12 @@ export interface Visit {
   anamnesiFisiologica?: string;
   anamnesiPatologicaRemota?: string;
   anamnesiProssima?: string;
+  /** Come è stata compilata l'anamnesi in questa visita (indipendente dalla preferenza attuale). */
+  anamnesiCampiSeparati?: boolean;
   esamiObiettivo: string;
   conclusioniDiagnostiche: string;
   terapie: string;
-  tipo?: 'generale' | 'bilancio_salute' | 'patologia' | 'controllo' | 'urgenza';
+  tipo?: 'generale' | 'bilancio_salute' | 'controllo';
   // Campi specifici pediatria
   pediatria?: {
     /** Parametri Auxologici */
@@ -149,9 +151,7 @@ export interface MedicalTemplate {
   id: string;
   category:
     | 'bilancio_salute'
-    | 'patologia'
     | 'controllo'
-    | 'urgenza'
     | 'terapie'
     | 'esame_complementare'
     | 'certificato';

@@ -5,6 +5,8 @@ import {
   CertificatoPaziente,
 } from "../types/Storage";
 import { DoctorService, PreferenceService, VisitService } from "./OfflineServices";
+import { backgroundCmTicksEvery20 } from "../utils/growthChartTicks";
+import { parseDateOnlyLocalMs } from "../utils/dateUtils";
 
 // ─── Layout ──────────────────────────────────────────────────────────────────
 const ML = 15;
@@ -176,8 +178,46 @@ export class PdfService {
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // AUXOLOGIA: tabella strutturata
+  // AUXOLOGIA: griglia orizzontale (stile legacy drawGridRow — etichette + valori centrati)
   // ─────────────────────────────────────────────────────────────────────────────
+  /** Una riga di celle affiancate con divisori verticali (come nelle versioni precedenti del PDF). */
+  private static drawAuxologicalGridRow(
+    doc: jsPDF,
+    y: number,
+    items: { label: string; value: string }[],
+  ): number {
+    if (items.length === 0) return y;
+    const rowHeight = 10;
+    const colWidth = PW / items.length;
+
+    y = this.pb(doc, y, rowHeight + 10);
+
+    this.dc(doc, K200); doc.setLineWidth(0.1);
+    doc.line(ML, y, MR, y);
+
+    items.forEach((item, i) => {
+      const x = ML + colWidth * i;
+
+      doc.setFont("helvetica", "bold"); doc.setFontSize(7); this.tc(doc, K80);
+      doc.text(san(item.label), x + colWidth / 2, y + 3.5, { align: "center" });
+
+      doc.setFont("helvetica", "normal"); doc.setFontSize(9); this.tc(doc, K30);
+      const raw = item.value?.trim() ? san(item.value) : "";
+      const lines = raw ? doc.splitTextToSize(raw, colWidth - 2) : [""];
+      doc.text(lines[0] ?? "", x + colWidth / 2, y + 7.5, { align: "center" });
+
+      if (i < items.length - 1) {
+        this.dc(doc, K200); doc.setLineWidth(0.1);
+        doc.line(x + colWidth, y, x + colWidth, y + rowHeight);
+      }
+    });
+
+    this.dc(doc, K200); doc.setLineWidth(0.1);
+    doc.line(ML, y + rowHeight, MR, y + rowHeight);
+
+    return y + rowHeight + 6;
+  }
+
   private static drawAuxologicalTable(
     doc: jsPDF,
     y: number,
@@ -195,149 +235,61 @@ export class PdfService {
     },
     includeCcAndBmi: boolean,
   ): number {
-    const fVal = (x?: string | number | null): string =>
-      x == null || String(x).trim() === "" ? "-" : String(x);
-    const fPerc = (p?: string | number | null): string => {
-      if (p == null) return "-";
+    const formatPerc = (p?: string | number | null): string => {
+      if (p == null) return "";
       const raw = String(p).trim();
-      if (!raw) return "-";
+      if (!raw) return "";
       const normalized = raw.endsWith("°") ? raw.slice(0, -1).trim() : raw;
       return `${normalized}°`;
     };
-    const pNum = (p?: string | number | null): number | null => {
-      if (p == null) return null;
-      const raw = String(p).trim().replace("°", "").replace(",", ".");
-      const n = Number(raw);
-      return Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : null;
+
+    const build = (
+      measure: number | null | undefined,
+      unit: string,
+      perc?: string | number | null,
+      formatMeasure?: (m: number) => string,
+    ): string => {
+      const pStr = formatPerc(perc);
+      const hasM = measure != null && Number.isFinite(measure as number);
+      if (!hasM && !pStr) return "";
+      let base = "";
+      if (hasM) {
+        const m = measure as number;
+        base = formatMeasure ? formatMeasure(m) : `${m}${unit}`;
+      }
+      if (pStr) return base ? `${base} (${pStr})` : `(${pStr})`;
+      return base;
     };
 
-    const drawPercentileBar = (bx: number, by: number, barW: number, rank: number) => {
-      const PAD_L = 2.2;
-      const PAD_R = 13;
-      const lineX0 = bx + PAD_L;
-      const lineX1 = bx + barW - PAD_R;
-      const lineW = Math.max(8, lineX1 - lineX0);
-      const toX = (val: number): number => lineX0 + (Math.max(0, Math.min(100, val)) / 100) * lineW;
-      const midY = by;
-      const tickH = 1.2;
+    const pa = params.pressioneArteriosa?.trim() || "";
+    const st = params.stadioTurner?.trim() || "";
 
-      this.dc(doc, K30); doc.setLineWidth(0.3);
-      doc.line(lineX0, midY, lineX1, midY);
-      doc.line(lineX0, midY - tickH, lineX0, midY + tickH);
-      doc.line(lineX1, midY - tickH, lineX1, midY + tickH);
-      const x50 = toX(50);
-      doc.line(x50, midY - tickH * 1.05, x50, midY + tickH * 1.05);
+    const numericCandidates: { label: string; value: string }[] = includeCcAndBmi
+      ? [
+          { label: "PESO", value: build(params.peso ?? null, " kg", params.percentilePeso) },
+          { label: "ALTEZZA", value: build(params.altezza ?? null, " cm", params.percentileAltezza) },
+          { label: "C.C.", value: build(params.circonferenzaCranica ?? null, " cm", params.percentileCC) },
+          { label: "BMI", value: build(params.bmi ?? null, "", params.percentileBmi, m => String(m)) },
+        ]
+      : [
+          { label: "PESO", value: build(params.peso ?? null, " kg", params.percentilePeso) },
+          { label: "ALTEZZA", value: build(params.altezza ?? null, " cm", params.percentileAltezza) },
+          { label: "BMI", value: build(params.bmi ?? null, "", params.percentileBmi, m => String(m)) },
+        ];
 
-      const xPat = toX(rank);
-      const dSize = 1.2;
-      this.fc(doc, K30); this.dc(doc, K30); doc.setLineWidth(0.1);
-      doc.moveTo(xPat, midY - dSize);
-      doc.lineTo(xPat + dSize, midY);
-      doc.lineTo(xPat, midY + dSize);
-      doc.lineTo(xPat - dSize, midY);
-      doc.lineTo(xPat, midY - dSize);
-      (doc as any).fillStroke();
+    // Una sola riga: misure + PA + Turner (solo colonne con dato)
+    const row: { label: string; value: string }[] = [
+      ...numericCandidates.filter(c => c.value.trim() !== ""),
+      ...(pa ? [{ label: "PA", value: pa } as const] : []),
+      ...(st ? [{ label: "STADIO DI TURNER", value: st } as const] : []),
+    ];
 
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(7.2);
-      this.tc(doc, K30);
-      doc.text(`${Math.round(rank)}°`, lineX1 + 1.8, midY + 1);
-    };
-
-    const pesoItem = {
-      label: "Peso",
-      value: params.peso != null ? `${params.peso} kg` : "-",
-      percentileLabel: fPerc(params.percentilePeso),
-      percentileRank: pNum(params.percentilePeso),
-    };
-    const altezzaItem = {
-      label: "Altezza",
-      value: params.altezza != null ? `${params.altezza} cm` : "-",
-      percentileLabel: fPerc(params.percentileAltezza),
-      percentileRank: pNum(params.percentileAltezza),
-    };
-    const ccItem = {
-      label: "C.C.",
-      value: params.circonferenzaCranica != null ? `${params.circonferenzaCranica} cm` : "-",
-      percentileLabel: fPerc(params.percentileCC),
-      percentileRank: pNum(params.percentileCC),
-    };
-    const bmiItem = {
-      label: "BMI",
-      value: params.bmi != null ? String(params.bmi) : "-",
-      percentileLabel: fPerc(params.percentileBmi),
-      percentileRank: pNum(params.percentileBmi),
-    };
-    const paItem = { label: "P.A.", value: fVal(params.pressioneArteriosa), percentileLabel: "-", percentileRank: null as number | null };
-    const turnerItem = { label: "Stadio di Turner", value: fVal(params.stadioTurner), percentileLabel: "-", percentileRank: null as number | null };
-
-    // Impaginazione "3 e 3":
-    // - sinistra: misure auxologiche (con percentile), senza BMI
-    // - destra: BMI (con percentile) + PA + Turner
-    // Questo riduce l'ingombro e mantiene barre/marker coerenti nel proprio blocco.
-    const leftItems = includeCcAndBmi ? [altezzaItem, pesoItem, ccItem] : [altezzaItem, pesoItem];
-    const rightItems = includeCcAndBmi ? [bmiItem, paItem, turnerItem] : [paItem, turnerItem];
+    if (row.length === 0) return y;
 
     y = this.heading(doc, y, "Parametri Auxologici");
+    y = this.drawAuxologicalGridRow(doc, y, row);
 
-    const ROW_H = 8;
-    const PAD = 1.6;
-    const BLOCK_W = PW / 2; // layout "invertito" a due blocchi affiancati
-    const COL_A = 26; // parametro
-    const COL_B = BLOCK_W - COL_A; // valore (eventuale barra percentile integrata)
-
-    const rowCount = Math.max(leftItems.length, rightItems.length);
-    y = this.pb(doc, y, ROW_H * (rowCount + 1) + 6);
-
-    const drawHeaderBlock = (bx: number) => {
-      this.fc(doc, K235); doc.rect(bx, y, BLOCK_W, ROW_H, "F");
-      this.dc(doc, K200); doc.setLineWidth(0.2); doc.rect(bx, y, BLOCK_W, ROW_H, "S");
-      doc.setFont("helvetica", "bold"); doc.setFontSize(7.6); this.tc(doc, K30);
-      doc.text("Parametro", bx + PAD, y + ROW_H / 2 + 0.4, { baseline: "middle" });
-      this.dc(doc, K200); doc.setLineWidth(0.15); doc.line(bx + COL_A, y, bx + COL_A, y + ROW_H);
-      doc.text("Valore", bx + COL_A + PAD, y + ROW_H / 2 + 0.4, { baseline: "middle" });
-    };
-
-    drawHeaderBlock(ML);
-    drawHeaderBlock(ML + BLOCK_W);
-    y += ROW_H;
-
-    for (let r = 0; r < rowCount; r++) {
-      y = this.pb(doc, y, ROW_H + 2);
-      for (let side = 0; side < 2; side++) {
-        const row = side === 0 ? leftItems[r] : rightItems[r];
-        if (!row) continue;
-        const bx = ML + side * BLOCK_W;
-
-        this.dc(doc, K200); doc.setLineWidth(0.15); doc.rect(bx, y, BLOCK_W, ROW_H, "S");
-        doc.line(bx + COL_A, y, bx + COL_A, y + ROW_H);
-
-        doc.setFont("helvetica", "bold"); doc.setFontSize(8.1); this.tc(doc, K30);
-        const label = doc.splitTextToSize(san(row.label), COL_A - PAD * 2);
-        doc.text(label[0] ?? "-", bx + PAD, y + ROW_H / 2 + 0.4, { baseline: "middle" });
-
-        const valueX = bx + COL_A + PAD;
-        const valueW = COL_B - PAD * 2;
-        const barW = 33;
-        const textW = row.percentileRank != null ? Math.max(10, valueW - barW - 2) : valueW;
-
-        doc.setFont("helvetica", "normal"); doc.setFontSize(8.1); this.tc(doc, K30);
-        const value = doc.splitTextToSize(san(row.value), textW);
-        doc.text(value[0] ?? "-", valueX, y + ROW_H / 2 + 0.4, { baseline: "middle" });
-
-        if (row.percentileRank != null) {
-          drawPercentileBar(valueX + textW + 1, y + ROW_H / 2, barW, row.percentileRank);
-        } else {
-          if (row.percentileLabel !== "-") {
-            doc.setFont("helvetica", "normal"); doc.setFontSize(8); this.tc(doc, K100);
-            doc.text(row.percentileLabel, valueX + textW + 1, y + ROW_H / 2 + 0.4, { baseline: "middle" });
-          }
-        }
-      }
-      y += ROW_H;
-    }
-
-    return y + 3;
+    return y + 2;
   }
 
   private static calcBmiFromAuxo(
@@ -499,7 +451,7 @@ export class PdfService {
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // PEDIATRIC GROWTH CHART (B&W STYLE)
+  // PEDIATRIC GROWTH CHART
   // ─────────────────────────────────────────────────────────────────────────────
   private static drawPediatricGrowthChart(params: {
     doc: jsPDF;
@@ -513,133 +465,225 @@ export class PdfService {
     const hasAny = (points && points.length > 0) || (arrival && Number.isFinite(arrival.yCm));
     if (!hasAny) return params.y;
 
-    params.y = this.pb(doc, params.y, 80);
+    params.y = this.pb(doc, params.y, 90);
 
     // Title
-    doc.setFont("helvetica", "bold"); doc.setFontSize(9); this.tc(doc, K0);
-    doc.text("Andamento crescita (Altezza)", 105, params.y, { align: "center" });
-    params.y += 6;
+    doc.setFont("helvetica", "bold"); doc.setFontSize(9.5); this.tc(doc, K0);
+    doc.text("Andamento Crescita (Altezza)", ML, params.y);
+    this.rule(doc, params.y + 1.5, ML, MR, 0.25);
+    params.y += 10;
 
     const boxY = params.y;
-    const boxX = ML + 10;
-    const boxW = PW - 20;
-    const boxH = 55;
-
-    // Frame
-    this.dc(doc, K200); doc.setLineWidth(0.2);
-    doc.rect(boxX, boxY, boxW, boxH, "S");
+    const leftAxisW = 12;
+    const boxX = ML + leftAxisW;
+    const boxW = PW - leftAxisW - 5;
+    const boxH = 60;
 
     const all = arrival
       ? [...points.map(p => ({ ...p })), { xIso: arrival.xIso, yCm: arrival.yCm }]
       : points;
 
-    const xs = all.map(p => new Date(p.xIso).getTime()).filter(t => Number.isFinite(t));
+    const xs = all.map(p => parseDateOnlyLocalMs(p.xIso)).filter(t => Number.isFinite(t));
     const ys = all.map(p => p.yCm).filter(v => Number.isFinite(v));
 
-    if (xs.length < 2 || ys.length < 1) return boxY + boxH + 6;
+    if (xs.length < 1 || ys.length < 1) return boxY + boxH + 10;
 
-    const minX = Math.min(...xs);
+    const minXRaw = Math.min(...xs);
     const maxXRaw = Math.max(...xs);
-    const maxX = maxXRaw === minX ? minX + 100000 : maxXRaw;
+    
+    // X-axis padding (approx 1 month in ms)
+    const paddingX = 30 * 24 * 60 * 60 * 1000;
+    const minX = minXRaw === maxXRaw ? minXRaw - paddingX : minXRaw - paddingX;
+    const maxX = minXRaw === maxXRaw ? minXRaw + paddingX : maxXRaw + paddingX;
 
     const minYRaw = Math.min(...ys);
     const maxYRaw = Math.max(...ys);
-    const spanY = Math.max(0.1, maxYRaw - minYRaw);
-    const minY = minYRaw - spanY * 0.1;
-    const maxY = maxYRaw + spanY * 0.1;
-    const spanY2 = Math.max(0.1, maxY - minY);
+    
+    // Y-axis bounds (dynamic step: 5 or 10 cm based on range)
+    const spanYRaw = Math.max(10, maxYRaw - minYRaw);
+    const stepY = spanYRaw > 40 ? 10 : 5;
+    let minY = Math.floor((minYRaw - spanYRaw * 0.1) / stepY) * stepY;
+    let maxY = Math.ceil((maxYRaw + spanYRaw * 0.1) / stepY) * stepY;
+    if (minY === maxY) {
+        minY -= stepY;
+        maxY += stepY;
+    }
+    
+    const spanY2 = maxY - minY;
+    const spanX = Math.max(1, maxX - minX);
 
-    const xScale = (t: number) => boxX + ((t - minX) / (maxX - minX)) * boxW;
+    const xScale = (t: number) => boxX + ((t - minX) / spanX) * boxW;
     const yScale = (v: number) => boxY + boxH - ((v - minY) / spanY2) * boxH;
 
-    // Y Axis Grid
-    const yTicks = 4;
-    doc.setFont("helvetica", "normal"); doc.setFontSize(6); this.tc(doc, K140);
+    // Background Grid
     this.dc(doc, K235); doc.setLineWidth(0.15);
-
-    for (let i = 0; i <= yTicks; i++) {
-      const t = i / yTicks;
-      const yVal = minY + (maxY - minY) * t;
+    
+    // Horizontal lines every stepY
+    for (let yVal = minY; yVal <= maxY; yVal += stepY) {
       const yPos = yScale(yVal);
-      if (i > 0 && i < yTicks) {
-        doc.line(boxX, yPos, boxX + boxW, yPos);
-      }
-      doc.text(`${Math.round(yVal)} cm`, boxX - 1.5, yPos + 2, { align: "right" });
+      doc.line(boxX, yPos, boxX + boxW, yPos);
+      
+      // Y-axis labels
+      doc.setFont("helvetica", "normal"); doc.setFontSize(7); this.tc(doc, K80);
+      doc.text(`${yVal}`, boxX - 2, yPos + 2.5, { align: "right" });
+    }
+    // Unit label
+    doc.setFont("helvetica", "italic"); doc.setFontSize(6.5); this.tc(doc, K140);
+    doc.text("cm", boxX - 2, boxY - 2, { align: "right" });
+
+    // Vertical lines (time segments)
+    const xSegments = 4;
+    for (let i = 0; i <= xSegments; i++) {
+      const t = minX + (spanX * i) / xSegments;
+      const xPos = xScale(t);
+      doc.line(xPos, boxY, xPos, boxY + boxH);
     }
 
-    // X Axis Labels: data completa (dd/mm/aaaa)
-    const xTicks = 4;
-    for (let i = 0; i < xTicks; i++) {
-      const t = xTicks === 1 ? 0 : i / (xTicks - 1);
-      const ts = minX + (maxX - minX) * t;
-      const xPos = xScale(ts);
-      if (i > 0 && i < xTicks - 1) {
-        doc.line(xPos, boxY, xPos, boxY + boxH);
-      }
-      const d = new Date(ts);
-      if (!Number.isFinite(d.getTime())) continue;
-      const day = String(d.getDate()).padStart(2, "0");
-      const month = String(d.getMonth() + 1).padStart(2, "0");
-      const year = String(d.getFullYear());
-      // Etichetta singola: dd/mm/aaaa
-      doc.setFontSize(5);
-      doc.text(`${day}/${month}/${year}`, xPos, boxY + boxH + 7.0, { align: "center" });
-    }
+    // Axis frames
+    this.dc(doc, K100); doc.setLineWidth(0.3);
+    doc.line(boxX, boxY, boxX, boxY + boxH); // Left Y
+    doc.line(boxX, boxY + boxH, boxX + boxW, boxY + boxH); // Bottom X
 
-    const sortedPoints = [...points].sort((a, b) => new Date(a.xIso).getTime() - new Date(b.xIso).getTime());
+    const sortedPoints = [...points].sort(
+      (a, b) => parseDateOnlyLocalMs(a.xIso) - parseDateOnlyLocalMs(b.xIso),
+    );
 
-    // Line
-    this.dc(doc, K0); doc.setLineWidth(0.35);
+    // Connecting lines with VC (Growth Velocity)
     for (let i = 0; i < sortedPoints.length - 1; i++) {
       const a = sortedPoints[i];
       const b = sortedPoints[i + 1];
-      doc.line(xScale(new Date(a.xIso).getTime()), yScale(a.yCm), xScale(new Date(b.xIso).getTime()), yScale(b.yCm));
-    }
+      const tsA = parseDateOnlyLocalMs(a.xIso);
+      const tsB = parseDateOnlyLocalMs(b.xIso);
+      const cx1 = xScale(tsA);
+      const cy1 = yScale(a.yCm);
+      const cx2 = xScale(tsB);
+      const cy2 = yScale(b.yCm);
 
-    // Points
-    this.dc(doc, K0); this.fc(doc, K0);
-    for (let i = 0; i < sortedPoints.length; i++) {
-      const p = sortedPoints[i];
-      const cx = xScale(new Date(p.xIso).getTime());
-      const cy = yScale(p.yCm);
-      const isLast = i === sortedPoints.length - 1;
-      if (isLast) {
-        doc.circle(cx, cy, 1.2, "FD");
-      } else {
-        this.dc(doc, K140); this.fc(doc, K235); doc.setLineWidth(0.1);
-        doc.circle(cx, cy, 0.9, "FD");
-        this.dc(doc, K0); this.fc(doc, K0);
+      // Line
+      this.dc(doc, K30); doc.setLineWidth(0.4);
+      doc.line(cx1, cy1, cx2, cy2);
+
+      // Growth Velocity Label
+      const msPerYear = 1000 * 60 * 60 * 24 * 365.25;
+      const yearsDiff = (tsB - tsA) / msPerYear;
+      if (yearsDiff > 0.08) {
+        const vc = (b.yCm - a.yCm) / yearsDiff;
+        const vcLabel = `${vc.toFixed(1)} cm/anno`;
+        const midX = (cx1 + cx2) / 2;
+        const midY = (cy1 + cy2) / 2;
+
+        doc.setFont("helvetica", "italic"); doc.setFontSize(6.5); this.tc(doc, K80);
+        doc.text(vcLabel, midX, midY - 3, { align: "center", baseline: "middle" });
       }
     }
 
-    // Arrival marker (diamond)
+    // Collision detection for labels
+    const placedLabels: { x: number, y: number, w: number, h: number }[] = [];
+    const checkCollision = (nx: number, ny: number, nw: number, nh: number) => {
+      const padX = 1.5;
+      const padY = 1.5;
+      for (const l of placedLabels) {
+        if (nx < l.x + l.w + padX && nx + nw + padX > l.x &&
+            ny < l.y + l.h + padY && ny + nh + padY > l.y) return true;
+      }
+      return false;
+    };
+
+    const tickXs = [...new Set(sortedPoints.map(p => parseDateOnlyLocalMs(p.xIso)))];
+    const manyDates = tickXs.length > 5;
+
+    // Points and Values
+    for (let i = 0; i < sortedPoints.length; i++) {
+      const p = sortedPoints[i];
+      const t = parseDateOnlyLocalMs(p.xIso);
+      const cx = xScale(t);
+      const cy = yScale(p.yCm);
+      
+      // Drop line to X axis
+      doc.setLineDashPattern([1, 1], 0);
+      this.dc(doc, K200); doc.setLineWidth(0.15);
+      doc.line(cx, cy, cx, boxY + boxH);
+      doc.setLineDashPattern([], 0);
+
+      // Dot
+      this.dc(doc, K0); this.fc(doc, K245); doc.setLineWidth(0.3);
+      doc.circle(cx, cy, 1.2, "FD");
+      
+      // Height Label (just value, positioned dynamically to avoid overlap)
+      const label = `${p.yCm}`;
+      doc.setFont("helvetica", "bold"); doc.setFontSize(7); this.tc(doc, K0);
+      const lw = doc.getTextWidth(label);
+      const lh = 3;
+      const offsets = [
+        { dx: 0, dy: -3.5 },         // top
+        { dx: 0, dy: 4.5 },          // bottom
+        { dx: 3 + lw/2, dy: 0 },     // right
+        { dx: -3 - lw/2, dy: 0 },    // left
+        { dx: 2 + lw/2, dy: -2.5 },  // top-right
+        { dx: -2 - lw/2, dy: -2.5 }, // top-left
+        { dx: 2 + lw/2, dy: 3.5 },   // bottom-right
+        { dx: -2 - lw/2, dy: 3.5 }   // bottom-left
+      ];
+      
+      let finalX = cx;
+      let finalY = cy - 3.5; // default fallback
+      for (const off of offsets) {
+          const nx = cx + off.dx - lw/2;
+          const ny = cy + off.dy - lh/2;
+          if (!checkCollision(nx, ny, lw, lh)) {
+              placedLabels.push({ x: nx, y: ny, w: lw, h: lh });
+              finalX = cx + off.dx;
+              finalY = cy + off.dy;
+              break;
+          }
+      }
+      doc.text(label, finalX, finalY, { align: "center", baseline: "middle" });
+      
+      // Date Label on X axis
+      const d = new Date(t);
+      const dd = String(d.getDate()).padStart(2, "0");
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      const yy = String(d.getFullYear()).slice(-2);
+      const dateStr = `${dd}/${mm}/${yy}`;
+      
+      doc.setFont("helvetica", "normal"); doc.setFontSize(6); this.tc(doc, K80);
+      if (manyDates) {
+        doc.text(dateStr, cx, boxY + boxH + 3.5, { align: "right", angle: -35 });
+      } else {
+        doc.text(dateStr, cx, boxY + boxH + 4, { align: "center" });
+      }
+    }
+
+    // Target Height (Arrival Marker)
     if (arrival && Number.isFinite(arrival.yCm)) {
-      const ts = new Date(arrival.xIso).getTime();
+      const ts = parseDateOnlyLocalMs(arrival.xIso);
       if (Number.isFinite(ts)) {
         const cx = xScale(ts);
         const cy = yScale(arrival.yCm);
-        const r = 1.6;
-        this.dc(doc, K0); this.fc(doc, K0); doc.setLineWidth(0.1);
+        
+        if (sortedPoints.length > 0) {
+          const lp = sortedPoints[sortedPoints.length - 1];
+          doc.setLineDashPattern([1.5, 1.5], 0);
+          this.dc(doc, K80); doc.setLineWidth(0.3);
+          doc.line(xScale(parseDateOnlyLocalMs(lp.xIso)), yScale(lp.yCm), cx, cy);
+          doc.setLineDashPattern([], 0);
+        }
+        
+        const r = 2;
+        this.dc(doc, K0); this.fc(doc, K235); doc.setLineWidth(0.3);
         doc.moveTo(cx, cy - r);
         doc.lineTo(cx + r, cy);
         doc.lineTo(cx, cy + r);
         doc.lineTo(cx - r, cy);
         doc.lineTo(cx, cy - r);
         (doc as any).fillStroke();
-        // Dashed line connecting last point to arrival
-        if (sortedPoints.length > 0) {
-          const lp = sortedPoints[sortedPoints.length - 1];
-          doc.setLineDashPattern([1, 1], 0);
-          this.dc(doc, K80); doc.setLineWidth(0.2);
-          doc.line(xScale(new Date(lp.xIso).getTime()), yScale(lp.yCm), cx, cy);
-          doc.setLineDashPattern([], 0); // reset
-        }
         
-        // Nessuna etichetta testuale: lasciamo solo il marker e la linea tratteggiata.
+        doc.setFont("helvetica", "bold"); doc.setFontSize(6.5); this.tc(doc, K0);
+        doc.text(`Target gen. ${arrival.yCm} cm`, cx, cy - 3.5, { align: "center" });
       }
     }
 
-    return boxY + boxH + 16;
+    return boxY + boxH + (manyDates ? 16 : 12);
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -661,9 +705,7 @@ export class PdfService {
 
     let title = "VISITA PEDIATRICA";
     if (visit.tipo === "bilancio_salute") title = "BILANCIO DI SALUTE";
-    else if (visit.tipo === "patologia") title = "VISITA PER PATOLOGIA";
     else if (visit.tipo === "controllo") title = "CONTROLLO PEDIATRICO";
-    else if (visit.tipo === "urgenza") title = "VISITA URGENTE";
 
     let y = this.drawHeader(doc, title, "Referto", doctor);
     y = this.drawPatientBlock(doc, patient, visit.dataVisita, y);
@@ -685,20 +727,17 @@ export class PdfService {
           stadioTurner: ped.stadioTurner?.trim() || null,
         }, true);
       } else {
-        // Manteniamo la tabella "Parametri Auxologici" anche se esistono solo PA/Turner.
-        if (ped.peso != null || ped.altezza != null || ped.pressioneArteriosa?.trim() || ped.stadioTurner?.trim()) {
-          const bmiCalc = this.calcBmiFromAuxo(ped.peso, ped.altezza, ped.bmi);
-          y = this.drawAuxologicalTable(doc, y, {
-            peso: ped.peso,
-            percentilePeso: ped.percentilePeso,
-            altezza: ped.altezza,
-            percentileAltezza: ped.percentileAltezza,
-            bmi: bmiCalc,
-            percentileBmi: ped.percentileBmi,
-            pressioneArteriosa: ped.pressioneArteriosa?.trim() || null,
-            stadioTurner: ped.stadioTurner?.trim() || null,
-          }, false);
-        }
+        const bmiCalc = this.calcBmiFromAuxo(ped.peso, ped.altezza, ped.bmi);
+        y = this.drawAuxologicalTable(doc, y, {
+          peso: ped.peso,
+          percentilePeso: ped.percentilePeso,
+          altezza: ped.altezza,
+          percentileAltezza: ped.percentileAltezza,
+          bmi: bmiCalc,
+          percentileBmi: ped.percentileBmi,
+          pressioneArteriosa: ped.pressioneArteriosa?.trim() || null,
+          stadioTurner: ped.stadioTurner?.trim() || null,
+        }, false);
       }
     }
 
@@ -714,8 +753,10 @@ export class PdfService {
     if (options?.includeGrowthChart !== false) {
       try {
         const allVisits = await VisitService.getVisitsByPatientId(patient.id);
+        const limitDay = visit.dataVisita?.slice(0, 10) || "";
         const rawPoints = allVisits
           .filter(v => v?.pediatria?.altezza != null && Number.isFinite(v.pediatria.altezza as number))
+          .filter(v => (v.dataVisita?.slice(0, 10) || "") <= limitDay)
           .map(v => ({ xIso: v.dataVisita, yCm: v.pediatria!.altezza as number }));
 
         if (ped?.altezza != null && Number.isFinite(ped.altezza as number)) {
@@ -724,7 +765,9 @@ export class PdfService {
 
         const map = new Map<string, { xIso: string; yCm: number }>();
         for (const p of rawPoints) map.set(`${p.xIso}|${Number(p.yCm).toFixed(2)}`, p);
-        const points = Array.from(map.values()).sort((a, b) => new Date(a.xIso).getTime() - new Date(b.xIso).getTime());
+        const points = Array.from(map.values()).sort(
+          (a, b) => parseDateOnlyLocalMs(a.xIso) - parseDateOnlyLocalMs(b.xIso),
+        );
 
         const father = ped?.altezzaPadre ?? patient.altezzaPadre;
         const mother = ped?.altezzaMadre ?? patient.altezzaMadre;
@@ -733,9 +776,14 @@ export class PdfService {
           const sum = (father as number) + (mother as number);
           const est = patient.sesso === "M" ? (sum + 13) / 2 : (sum - 13) / 2;
           if (Number.isFinite(est)) {
-            const d = new Date(visit.dataVisita);
-            d.setDate(d.getDate() + 1);
-            arrival = { xIso: d.toISOString().slice(0, 10), yCm: est };
+            const day = visit.dataVisita?.trim().slice(0, 10);
+            if (day && /^\d{4}-\d{2}-\d{2}$/.test(day)) {
+              const [y, m, da] = day.split("-").map(Number);
+              const adv = new Date(y, m - 1, da);
+              adv.setDate(adv.getDate() + 1);
+              const nextIso = `${adv.getFullYear()}-${String(adv.getMonth() + 1).padStart(2, "0")}-${String(adv.getDate()).padStart(2, "0")}`;
+              arrival = { xIso: nextIso, yCm: est };
+            }
           }
         }
         y = this.drawPediatricGrowthChart({ doc, y, patient, visit, points, arrival });
@@ -753,7 +801,7 @@ export class PdfService {
     patient: Patient, richiesta: RichiestaEsameComplementare, doctor: Doctor | null
   ): Promise<Blob> {
     const doc = new jsPDF();
-    let y = this.drawHeader(doc, "RICHIESTA ESAME COMPLEMENTARE", "Prescrizione esame", doctor, false);
+    let y = this.drawHeader(doc, "RICHIESTA ESAME COMPLEMENTARE", "Prescrizione esame", doctor);
     y = this.drawPatientBlock(doc, patient, richiesta.dataRichiesta, y);
     y += 4;
     y = this.heading(doc, y, "Esame richiesto");
@@ -783,10 +831,14 @@ export class PdfService {
   ): Promise<Blob> {
     const doc = new jsPDF();
     const tipoL: Record<CertificatoPaziente["tipo"], string> = {
-      assenza_lavoro: "Assenza da lavoro", idoneita: "Idoneita'", malattia: "Malattia", altro: "Altro",
+      assenza_lavoro: "Assenza da scuola / astensione",
+      idoneita: "Idoneita' alla frequenza scolastica",
+      malattia: "Certificato di malattia",
+      altro: "Altro",
     };
     const headerTitle = certificato.titolo?.trim() || "CERTIFICATO MEDICO";
-    let y = this.drawHeader(doc, headerTitle, tipoL[certificato.tipo] || certificato.tipo, doctor, false);
+    // Stessa intestazione del referto: Dott., specializzazione, linee, titolo documento
+    let y = this.drawHeader(doc, headerTitle, tipoL[certificato.tipo] || certificato.tipo, doctor);
     y = this.drawPatientBlock(doc, patient, certificato.dataCertificato, y, "Data certificato");
     y += 4;
     y = this.heading(doc, y, "Testo del Certificato");

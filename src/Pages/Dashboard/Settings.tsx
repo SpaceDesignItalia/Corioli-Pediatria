@@ -55,6 +55,51 @@ import { MedicalTemplate } from "../../types/Storage";
 import { getMissingDoctorProfileFields } from "../../utils/doctorProfile";
 import axios from "axios";
 
+/** Categorie usate nei referti pediatrici (niente «terapie»: non è un tipo di visita). */
+const MAIN_TEMPLATE_CATEGORY_KEYS = [
+  "bilancio_salute",
+  "controllo",
+  "esame_complementare",
+  "certificato",
+] as const satisfies readonly MedicalTemplate["category"][];
+
+const CATEGORY_LABELS: Record<MedicalTemplate["category"], string> = {
+  bilancio_salute: "Visita pediatrica",
+  controllo: "Visita di controllo",
+  terapie: "Terapie (non più usata)",
+  esame_complementare: "Richieste esami complementari",
+  certificato: "Certificati",
+};
+
+const SECTION_LABELS: Record<MedicalTemplate["section"], string> = {
+  anamnesi: "Anamnesi",
+  esameObiettivo: "Visita / esame obiettivo",
+  conclusioni: "Conclusioni e terapie",
+  generale: "Generale",
+  nome: "Nome esame",
+  note: "Note",
+};
+
+function getDefaultSectionForCategory(
+  category: MedicalTemplate["category"],
+): MedicalTemplate["section"] {
+  if (category === "esame_complementare") return "nome";
+  if (category === "certificato") return "generale";
+  if (category === "terapie") return "generale";
+  return "anamnesi";
+}
+
+/** Sezioni ammesse per categoria (allineate a visita / esami / certificati). */
+function sectionOptionsForCategory(
+  category: MedicalTemplate["category"] | undefined,
+): MedicalTemplate["section"][] {
+  if (!category) return ["anamnesi", "esameObiettivo", "conclusioni"];
+  if (category === "certificato") return ["generale"];
+  if (category === "esame_complementare") return ["nome"];
+  if (category === "terapie") return ["generale"];
+  return ["anamnesi", "esameObiettivo", "conclusioni"];
+}
+
 const SettingsScreen = () => {
   // ... state declarations ...
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
@@ -407,39 +452,76 @@ const SettingsScreen = () => {
     }
   };
 
+  const filteredTemplatesForTable = useMemo(() => {
+    return templates.filter((t) => t.category === selectedCategory);
+  }, [templates, selectedCategory]);
+
   const handleEditTemplate = (template: MedicalTemplate) => {
-    setCurrentTemplate(template);
+    const opts = sectionOptionsForCategory(template.category);
+    let section = opts.includes(template.section)
+      ? template.section
+      : opts[0];
+    if (template.category === "esame_complementare") {
+      section = "nome";
+    }
+    setCurrentTemplate({ ...template, section });
     onTemplateModalOpen();
   };
 
   const handleNewTemplate = () => {
-    const sectionByCategory: Record<string, string> = {
-      bilancio_salute: "anamnesi",
-      patologia: "anamnesi",
-      controllo: "anamnesi",
-      urgenza: "anamnesi",
-      terapie: "generale",
-      esame_complementare: "nome",
-    };
+    let category: MedicalTemplate["category"] = "bilancio_salute";
+    if (
+      (MAIN_TEMPLATE_CATEGORY_KEYS as readonly string[]).includes(
+        selectedCategory,
+      )
+    ) {
+      category = selectedCategory as MedicalTemplate["category"];
+    }
     setCurrentTemplate({
       label: "",
       text: "",
-      category: selectedCategory as any,
-      section: (sectionByCategory[selectedCategory] ?? "anamnesi") as any,
+      category,
+      section: getDefaultSectionForCategory(category),
     });
     onTemplateModalOpen();
   };
 
   const handleSaveTemplate = async () => {
+    const label = (currentTemplate.label ?? "").trim();
+    const text = (currentTemplate.text ?? "").trim();
+    if (!label || !text) {
+      setError("Compila «Nome in menu» e «Contenuto inserito».");
+      setTimeout(() => setError(null), 5000);
+      return;
+    }
+    if (!currentTemplate.category) {
+      setError("Seleziona una categoria.");
+      setTimeout(() => setError(null), 5000);
+      return;
+    }
     try {
-      if (currentTemplate.id) {
-        await TemplateService.updateTemplate(
-          currentTemplate.id,
-          currentTemplate,
-        );
+      const cat = currentTemplate.category;
+      const section: MedicalTemplate["section"] =
+        cat === "certificato"
+          ? "generale"
+          : cat === "esame_complementare"
+            ? "nome"
+            : (currentTemplate.section ??
+              getDefaultSectionForCategory(cat));
+
+      const toSave: Partial<MedicalTemplate> = {
+        ...currentTemplate,
+        label,
+        text,
+        category: cat,
+        section,
+        ...(cat === "certificato" ? { section: "generale" as const } : {}),
+      };
+      if (toSave.id) {
+        await TemplateService.updateTemplate(toSave.id, toSave);
       } else {
         await TemplateService.addTemplate(
-          currentTemplate as Omit<MedicalTemplate, "id">,
+          toSave as Omit<MedicalTemplate, "id" | "isDefault">,
         );
       }
       await loadTemplates();
@@ -1705,6 +1787,11 @@ const SettingsScreen = () => {
                       Attivo: 1. Fisiologica • 2. Patologica remota • 3.
                       Prossima
                     </p>
+                    <p className="text-xs text-default-400 mt-2 max-w-xl">
+                      Vale per le <strong>nuove visite</strong>. In modifica, ogni
+                      visita resta con il layout con cui è stata salvata (campo
+                      unico o campi separati), anche se cambi questa impostazione.
+                    </p>
                   </div>
                   <Switch
                     aria-label="Abilita anamnesi pediatrica in campi separati"
@@ -1980,7 +2067,7 @@ const SettingsScreen = () => {
             <div className="flex items-center gap-3">
               <FileText className="w-5 h-5 text-primary" />
               <h2 className="text-xl font-semibold text-gray-900">
-                Gestione Modelli Referti
+                Gestione Modelli Referti e Certificati
               </h2>
             </div>
             <Button
@@ -1997,46 +2084,66 @@ const SettingsScreen = () => {
           <Tabs
             aria-label="Categorie Template"
             selectedKey={selectedCategory}
-            onSelectionChange={(key) => setSelectedCategory(key as string)}
+            onSelectionChange={(key) => setSelectedCategory(String(key))}
           >
-            <Tab key="bilancio_salute" title="Visita pediatrica" />
-            <Tab key="patologia" title="Patologia" />
-            <Tab key="controllo" title="Controllo" />
-            <Tab key="urgenza" title="Urgenza" />
-            <Tab key="terapie" title="Terapie" />
-            <Tab key="esame_complementare" title="Esami" />
+            {MAIN_TEMPLATE_CATEGORY_KEYS.map((key) => (
+              <Tab key={key} title={CATEGORY_LABELS[key]} />
+            ))}
           </Tabs>
 
           <p className="text-sm text-default-500 mb-3">
-            I modelli compaiono nei pulsanti &quot;Modello&quot; / &quot;Modelli
-            Esame&quot; durante la compilazione. Il{" "}
-            <strong>nome in menu</strong> è ciò che vedi quando cerchi; il{" "}
-            <strong>contenuto inserito</strong> è il testo che va nel referto
-            quando lo selezioni.
+            {selectedCategory === "certificato" ? (
+              <>
+                I modelli certificato compaiono nel menu{" "}
+                <strong>Modelli certificato</strong> quando crei un certificato dalla
+                scheda paziente. Modifica testo e titolo come preferisci.
+              </>
+            ) : selectedCategory === "esame_complementare" ? (
+              <>
+                Compaiono in <strong>Modelli Esame</strong> nelle richieste esame dalla
+                scheda paziente.
+              </>
+            ) : (
+              <>
+                Compaiono nei pulsanti <strong>Modello</strong> durante la visita per
+                il tipo selezionato (anamnesi, visita, conclusioni in base alla
+                sezione). <strong>Nome in menu</strong> = voce nel menu;{" "}
+                <strong>Contenuto inserito</strong> = testo inserito nel referto.
+              </>
+            )}
           </p>
           <Table aria-label="Tabella Modelli">
             <TableHeader>
               <TableColumn>Nome in menu</TableColumn>
-              <TableColumn>Sezione</TableColumn>
+              <TableColumn>Categoria e sezione</TableColumn>
               <TableColumn>Contenuto inserito</TableColumn>
               <TableColumn>AZIONI</TableColumn>
             </TableHeader>
             <TableBody
               emptyContent={"Nessun modello trovato per questa categoria."}
             >
-              {templates
-                .filter((t) => t.category === selectedCategory)
-                .map((template) => (
+              {filteredTemplatesForTable.map((template) => (
                   <TableRow key={template.id}>
                     <TableCell className="font-medium">
                       {template.label}
                     </TableCell>
                     <TableCell>
-                      <Chip size="sm" variant="flat" className="capitalize">
-                        {template.section === "esameObiettivo"
-                          ? "Esame Ob."
-                          : template.section}
-                      </Chip>
+                      <div className="flex flex-col gap-1">
+                        <Chip size="sm" variant="flat" className="w-fit">
+                          {CATEGORY_LABELS[template.category] ??
+                            template.category}
+                        </Chip>
+                        <Chip
+                          size="sm"
+                          variant="bordered"
+                          className="w-fit text-xs"
+                        >
+                          {template.category === "certificato"
+                            ? "Testo certificato"
+                            : SECTION_LABELS[template.section] ??
+                              template.section}
+                        </Chip>
+                      </div>
                     </TableCell>
                     <TableCell>
                       <div className="max-w-xs truncate text-default-500">
@@ -2246,110 +2353,129 @@ const SettingsScreen = () => {
           <ModalBody onContextMenu={(e) => e.stopPropagation()}>
             <div className="space-y-5">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {currentTemplate.id ? (
-                  <Select
-                    label="Categoria"
-                    selectedKeys={
-                      currentTemplate.category ? [currentTemplate.category] : []
-                    }
-                    onSelectionChange={(keys) =>
-                      setCurrentTemplate((prev) => ({
-                        ...prev,
-                        category: Array.from(keys)[0] as any,
-                      }))
-                    }
-                  >
-                    <SelectItem key="bilancio_salute" value="bilancio_salute">
-                      Visita pediatrica
-                    </SelectItem>
-                    <SelectItem key="patologia" value="patologia">
-                      Patologia
-                    </SelectItem>
-                    <SelectItem key="controllo" value="controllo">
-                      Controllo
-                    </SelectItem>
-                    <SelectItem key="urgenza" value="urgenza">
-                      Urgenza
-                    </SelectItem>
-                    <SelectItem key="terapie" value="terapie">
-                      Terapie
-                    </SelectItem>
-                    <SelectItem
-                      key="esame_complementare"
-                      value="esame_complementare"
-                    >
-                      Esami
-                    </SelectItem>
-                  </Select>
-                ) : (
-                  <div className="flex flex-col gap-1">
-                    <span className="text-sm text-default-500 font-medium">
-                      Categoria
-                    </span>
-                    <p className="text-default-700 font-medium capitalize">
-                      {currentTemplate.category === "esame_complementare"
-                        ? "Esami"
-                        : currentTemplate.category}
-                    </p>
-                  </div>
-                )}
                 <Select
-                  label="Sezione"
+                  label="Categoria"
+                  placeholder="Dove si usa questo modello"
                   selectedKeys={
-                    currentTemplate.section ? [currentTemplate.section] : []
+                    currentTemplate.category
+                      ? new Set([currentTemplate.category])
+                      : new Set()
                   }
-                  onSelectionChange={(keys) =>
+                  onSelectionChange={(keys) => {
+                    const k = Array.from(keys)[0] as
+                      | MedicalTemplate["category"]
+                      | undefined;
+                    if (!k) return;
                     setCurrentTemplate((prev) => ({
                       ...prev,
-                      section: Array.from(keys)[0] as any,
-                    }))
-                  }
+                      category: k,
+                      section: getDefaultSectionForCategory(k),
+                    }));
+                  }}
                 >
-                  <SelectItem key="anamnesi" value="anamnesi">
-                    Anamnesi / Prestazione
-                  </SelectItem>
-                  <SelectItem key="esameObiettivo" value="esameObiettivo">
-                    Esame Obiettivo / Eco
-                  </SelectItem>
-                  <SelectItem key="conclusioni" value="conclusioni">
-                    Conclusioni
-                  </SelectItem>
-                  <SelectItem key="generale" value="generale">
-                    Generale
-                  </SelectItem>
-                  <SelectItem key="nome" value="nome">
-                    Nome esame
-                  </SelectItem>
+                  {MAIN_TEMPLATE_CATEGORY_KEYS.map((key) => (
+                    <SelectItem key={key} textValue={CATEGORY_LABELS[key]}>
+                      {CATEGORY_LABELS[key]}
+                    </SelectItem>
+                  ))}
+                  {currentTemplate.category === "terapie" && (
+                    <SelectItem key="terapie" textValue={CATEGORY_LABELS.terapie}>
+                      {CATEGORY_LABELS.terapie}
+                    </SelectItem>
+                  )}
                 </Select>
+
+                {currentTemplate.category === "certificato" ? (
+                  <div className="flex flex-col gap-1 justify-end pb-1">
+                    <span className="text-sm text-default-500 font-medium">
+                      Sezione
+                    </span>
+                    <p className="text-default-700 text-sm">
+                      Testo certificato (un solo blocco)
+                    </p>
+                  </div>
+                ) : currentTemplate.category === "esame_complementare" ? (
+                  <div className="flex flex-col gap-1 justify-end pb-1">
+                    <span className="text-sm text-default-500 font-medium">
+                      Tipo modello
+                    </span>
+                    <p className="text-default-700 text-sm">
+                      Richiesta esame: nome in menu, testo prescrizione e note
+                      opzionali (campi sotto).
+                    </p>
+                  </div>
+                ) : (
+                  <Select
+                    label="Sezione del referto"
+                    placeholder="Es. Anamnesi, Visita…"
+                    selectedKeys={
+                      currentTemplate.section
+                        ? new Set([currentTemplate.section])
+                        : new Set()
+                    }
+                    onSelectionChange={(keys) => {
+                      const s = Array.from(keys)[0] as
+                        | MedicalTemplate["section"]
+                        | undefined;
+                      if (!s) return;
+                      setCurrentTemplate((prev) => ({ ...prev, section: s }));
+                    }}
+                    isDisabled={!currentTemplate.category}
+                  >
+                    {sectionOptionsForCategory(
+                      currentTemplate.category,
+                    ).map((sec) => (
+                      <SelectItem key={sec} textValue={SECTION_LABELS[sec]}>
+                        {SECTION_LABELS[sec]}
+                      </SelectItem>
+                    ))}
+                  </Select>
+                )}
               </div>
 
               <Input
                 label="Nome in menu"
-                placeholder="Es. Emocromo, Eco addome..."
+                placeholder={
+                  currentTemplate.category === "certificato"
+                    ? "Es. Assenza da scuola, Idoneità sportiva..."
+                    : "Es. Emocromo, Eco addome..."
+                }
                 value={currentTemplate.label}
                 onValueChange={(val) =>
                   setCurrentTemplate((prev) => ({ ...prev, label: val }))
                 }
-                description="Titolo che vedi quando cerchi o selezioni il modello (nel menu a tendina)"
+                description={
+                  currentTemplate.category === "certificato"
+                    ? "Titolo nel menu «Modelli certificato» nella scheda paziente"
+                    : "Titolo che vedi quando cerchi o selezioni il modello (nel menu a tendina)"
+                }
               />
               <Textarea
                 label="Contenuto inserito"
                 placeholder={
                   currentTemplate.category === "esame_complementare"
                     ? "Es. Emocromo con formula, Ecografia addome completo..."
-                    : "Testo che verrà inserito nel referto..."
+                    : currentTemplate.category === "certificato"
+                      ? "Testo del certificato (puoi usare segnaposto [NOME PAZIENTE], [DATA NASCITA]...)"
+                      : "Testo che verrà inserito nel referto..."
                 }
                 value={currentTemplate.text}
                 onValueChange={(val) =>
                   setCurrentTemplate((prev) => ({ ...prev, text: val }))
                 }
                 minRows={
-                  currentTemplate.category === "esame_complementare" ? 2 : 5
+                  currentTemplate.category === "esame_complementare"
+                    ? 2
+                    : currentTemplate.category === "certificato"
+                      ? 6
+                      : 5
                 }
                 description={
                   currentTemplate.category === "esame_complementare"
                     ? "Nome dell'esame che compare nella richiesta quando lo selezioni"
-                    : "Testo che viene inserito nel referto quando selezioni questo modello"
+                    : currentTemplate.category === "certificato"
+                      ? "Testo inserito nel campo certificato; puoi modificarlo anche dopo la selezione"
+                      : "Testo che viene inserito nel referto quando selezioni questo modello"
                 }
                 spellCheck
               />
@@ -2363,6 +2489,18 @@ const SettingsScreen = () => {
                   }
                   minRows={2}
                   description="Note aggiuntive per la richiesta esame"
+                />
+              )}
+              {currentTemplate.category === "certificato" && (
+                <Textarea
+                  label="Nota interna (opzionale)"
+                  placeholder="Es. assenza scuola, idoneità — aiuta il riconoscimento automatico del tipo"
+                  value={currentTemplate.note || ""}
+                  onValueChange={(val) =>
+                    setCurrentTemplate((prev) => ({ ...prev, note: val }))
+                  }
+                  minRows={2}
+                  description="Usata per suggerire il «tipo certificato» quando selezioni il modello (parole chiave: assenza, idoneità, malattia)."
                 />
               )}
             </div>
