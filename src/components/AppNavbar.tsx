@@ -11,6 +11,7 @@ import {
   Tooltip,
   Avatar,
   Button,
+  Spinner,
 } from "@nextui-org/react";
 import { useLocation, Link, useNavigate } from "react-router-dom";
 import { AcmeIcon } from "./sidebar/AcmeIcon";
@@ -38,6 +39,8 @@ export default function AppNavbar() {
   const [profileImage, setProfileImage] = useState<string | null>(null);
   const [updateAvailable, setUpdateAvailable] = useState<string | null>(null);
   const [updateDownloaded, setUpdateDownloaded] = useState(false);
+  const [updateChecking, setUpdateChecking] = useState(false);
+  const [updateDownloading, setUpdateDownloading] = useState(false);
 
   const loadDoctor = async () => {
     try {
@@ -129,6 +132,7 @@ export default function AppNavbar() {
             cb: (info: { version?: string }) => void,
           ) => void;
           onUpdaterNotAvailable?: (cb: () => void) => void;
+          onUpdaterProgress?: (cb: (p: { percent?: number }) => void) => void;
           onUpdaterDownloaded?: (cb: () => void) => void;
         };
       }
@@ -137,50 +141,62 @@ export default function AppNavbar() {
     if (!api) return;
 
     api.onUpdaterChecking?.(() => {
+      setUpdateChecking(true);
       setUpdateAvailable(null);
       setUpdateDownloaded(false);
+      setUpdateDownloading(false);
     });
     api.onUpdaterAvailable?.((info) => {
+      setUpdateChecking(false);
       setUpdateAvailable(info?.version || "Nuova versione");
       setUpdateDownloaded(false);
+      setUpdateDownloading(true);
     });
     api.onUpdaterNotAvailable?.(() => {
+      setUpdateChecking(false);
       setUpdateAvailable(null);
       setUpdateDownloaded(false);
+      setUpdateDownloading(false);
+    });
+    api.onUpdaterProgress?.(() => {
+      setUpdateDownloading(true);
     });
     api.onUpdaterDownloaded?.(() => {
+      setUpdateDownloading(false);
       setUpdateDownloaded(true);
       setUpdateAvailable(null);
     });
 
     const checkUpdateIfAllowed = async () => {
       try {
+        setUpdateChecking(true);
         const doctor = await DoctorService.getDoctor();
         const clientId = doctor?.id?.trim();
-        if (!clientId) return;
+        if (!clientId) {
+          setUpdateChecking(false);
+          return;
+        }
 
-        const appVersion = await ((
-          window as unknown as {
-            electronAPI?: { getAppVersion?: () => Promise<string> };
-          }
-        ).electronAPI?.getAppVersion?.() ?? Promise.resolve("0.0.0"));
+        const appVersion = await (
+          (window as unknown as { electronAPI?: { getAppVersion?: () => Promise<string> } })
+            .electronAPI?.getAppVersion?.() ?? Promise.resolve("0.0.0")
+        );
 
-        const access = await axios.get<{
-          shouldUpdate: boolean;
-          allowed: boolean;
-        }>(`${import.meta.env.VITE_API_URL}/updates/check-access`, {
-          params: {
-            app: "corioli-pediatria",
-            clientId,
-            currentVersion: appVersion,
+        const access = await axios.get<{ shouldUpdate: boolean; allowed: boolean }>(
+          `${import.meta.env.VITE_API_URL}/updates/check-access`,
+          {
+            params: {
+              app: "corioli-pediatria",
+              clientId,
+              currentVersion: appVersion,
+            },
           },
-        });
-
-        console.log("access", access.data);
+        );
 
         if (!access.data.allowed || !access.data.shouldUpdate) {
           setUpdateAvailable(null);
           setUpdateDownloaded(false);
+          setUpdateChecking(false);
           return;
         }
 
@@ -188,8 +204,9 @@ export default function AppNavbar() {
         if (result?.version) {
           setUpdateAvailable(result.version);
         }
+        setUpdateChecking(false);
       } catch {
-        // ignore
+        setUpdateChecking(false);
       }
     };
 
@@ -208,8 +225,6 @@ export default function AppNavbar() {
     ).electronAPI;
     api?.updaterQuitAndInstall?.();
   };
-
-  console.log("updateAvailable", updateAvailable);
 
   return (
     <Navbar
@@ -275,7 +290,27 @@ export default function AppNavbar() {
           </Tooltip>
         </NavbarItem>
 
-        {updateAvailable && (
+        {updateChecking && (
+          <NavbarItem className="hidden md:flex">
+            <Tooltip content="Controllo aggiornamenti in corso">
+              <span className="flex items-center gap-1.5 text-default-500 text-sm">
+                <Spinner size="sm" color="primary" />
+                Controllo aggiornamenti...
+              </span>
+            </Tooltip>
+          </NavbarItem>
+        )}
+        {updateDownloading && (
+          <NavbarItem className="hidden md:flex">
+            <Tooltip content="Download aggiornamento in corso">
+              <span className="flex items-center gap-1.5 text-primary text-sm">
+                <Spinner size="sm" color="primary" />
+                Download in corso...
+              </span>
+            </Tooltip>
+          </NavbarItem>
+        )}
+        {(updateAvailable || updateDownloaded) && !updateDownloading && (
           <NavbarItem className="hidden md:flex">
             {updateDownloaded ? (
               <Tooltip content="Installa l'aggiornamento e riavvia">
@@ -359,7 +394,23 @@ export default function AppNavbar() {
             <span>Ricarica app</span>
           </button>
         </NavbarMenuItem>
-        {(updateAvailable || updateDownloaded) && (
+        {updateChecking && (
+          <NavbarMenuItem className="pb-3 border-b border-default-100">
+            <span className="flex items-center gap-2 text-default-500 text-sm">
+              <Spinner size="sm" color="primary" />
+              Controllo aggiornamenti...
+            </span>
+          </NavbarMenuItem>
+        )}
+        {updateDownloading && (
+          <NavbarMenuItem className="pb-3 border-b border-default-100">
+            <span className="flex items-center gap-2 text-primary text-sm">
+              <Spinner size="sm" color="primary" />
+              Download in corso...
+            </span>
+          </NavbarMenuItem>
+        )}
+        {(updateAvailable || updateDownloaded) && !updateDownloading && (
           <NavbarMenuItem className="pb-3 border-b border-default-100">
             {updateDownloaded ? (
               <button
