@@ -6,8 +6,8 @@ import { DoctorService } from "../services/OfflineServices";
 import { storageService } from "../services/StorageServiceFallback";
 import { sendHeartbeat } from "../services/HeartbeatService";
 
-const SUPPORT_EMAIL = "support@corioli.app";
-const SUPPORT_PHONE = "+39 02 1234567";
+const SUPPORT_EMAIL = "pablobertot@gmail.com";
+const SUPPORT_PHONE = "+39 3938001284";
 const BLOCKED_STORAGE_KEY = "blocked_users";
 
 export default function Blocked() {
@@ -23,7 +23,10 @@ export default function Blocked() {
       if (!id) return;
 
       if (doctor) {
-        const { blocked, reason } = await sendHeartbeat(doctor, "corioli-pediatria");
+        const { blocked, reason } = await sendHeartbeat(
+          doctor,
+          "corioli-pediatria",
+        );
         if (blocked === false) {
           const payload = {
             blocked: false,
@@ -89,7 +92,7 @@ export default function Blocked() {
           <p className="text-center text-slate-300 text-sm">
             L&apos;accesso a Corioli è stato disattivato. <br />
             {reason && (
-              <span className="text-slate-300 text-sm">Motivo: {reason}</span>
+              <p className="text-slate-300 text-sm">Motivo: {reason}</p>
             )}
           </p>
         </CardHeader>

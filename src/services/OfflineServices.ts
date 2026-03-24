@@ -1,5 +1,5 @@
 import { storageService } from './StorageServiceFallback';
-import { Patient, Visit, Doctor, Document, BackupImportMode, RichiestaEsameComplementare } from '../types/Storage';
+import { Patient, Visit, Doctor, Document, BackupImportMode, RichiestaEsameComplementare, CertificatoPaziente } from '../types/Storage';
 
 // Servizio per gestire i pazienti offline
 export class PatientService {
@@ -124,6 +124,38 @@ export class RichiestaEsameService {
 
   static async delete(id: string): Promise<void> {
     return await storageService.deleteRichiestaEsame(id);
+  }
+}
+
+// Certificati paziente
+export class CertificatoService {
+  static async getByPatientId(patientId: string): Promise<CertificatoPaziente[]> {
+    return await storageService.getCertificatiByPatientId(patientId);
+  }
+
+  static async getById(id: string): Promise<CertificatoPaziente | null> {
+    return await storageService.getCertificatoById(id);
+  }
+
+  static async add(data: {
+    patientId: string;
+    tipo: CertificatoPaziente["tipo"];
+    titolo?: string;
+    dataCertificato: string;
+    descrizione?: string;
+  }): Promise<CertificatoPaziente> {
+    return await storageService.addCertificato(data);
+  }
+
+  static async update(
+    id: string,
+    data: Partial<Pick<CertificatoPaziente, "tipo" | "titolo" | "dataCertificato" | "descrizione">>,
+  ): Promise<CertificatoPaziente> {
+    return await storageService.updateCertificato(id, data);
+  }
+
+  static async delete(id: string): Promise<void> {
+    return await storageService.deleteCertificato(id);
   }
 }
 
@@ -340,11 +372,13 @@ export class TemplateService {
   }
 
   static async getTemplatesByCategoryAndSection(
-    category: 'ginecologia' | 'ostetricia' | 'terapie',
-    section: 'prestazione' | 'esameObiettivo' | 'conclusioni' | 'generale'
+    category: MedicalTemplate['category'],
+    section: MedicalTemplate['section'],
   ): Promise<MedicalTemplate[]> {
     const templates = await this.getAllTemplates();
-    return templates.filter(t => t.category === category && t.section === section);
+    return templates.filter(
+      (t) => t.category === category && t.section === section,
+    );
   }
 
   static async addTemplate(templateData: Omit<MedicalTemplate, 'id' | 'isDefault'>): Promise<MedicalTemplate> {

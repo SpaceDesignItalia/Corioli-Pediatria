@@ -33,6 +33,10 @@ interface RegisterData {
   cf: string;
   gender: string;
   address: string;
+  // Dati auxologici (pediatria)
+  peso?: string;
+  altezzaPadre?: string;
+  altezzaMadre?: string;
 }
 
 export default function AddPatient() {
@@ -46,6 +50,9 @@ export default function AddPatient() {
     cf: "",
     gender: "F",
     address: "",
+    peso: "",
+    altezzaPadre: "",
+    altezzaMadre: "",
   });
 
   const [isLoading, setIsLoading] = useState(false);
@@ -90,7 +97,12 @@ export default function AddPatient() {
           birthplace: patient.luogoNascita,
           cf: patient.codiceFiscale || "",
           gender: patient.sesso,
-          address: patient.indirizzo || ""
+          address: patient.indirizzo || "",
+          peso: patient.peso != null ? String(patient.peso) : "",
+          altezzaPadre:
+            patient.altezzaPadre != null ? String(patient.altezzaPadre) : "",
+          altezzaMadre:
+            patient.altezzaMadre != null ? String(patient.altezzaMadre) : "",
         });
       } else {
         setError("Paziente non trovato");
@@ -120,7 +132,12 @@ export default function AddPatient() {
           birthplace: patient.luogoNascita,
           cf: patient.codiceFiscale || "",
           gender: patient.sesso,
-          address: patient.indirizzo || ""
+          address: patient.indirizzo || "",
+          peso: patient.peso != null ? String(patient.peso) : "",
+          altezzaPadre:
+            patient.altezzaPadre != null ? String(patient.altezzaPadre) : "",
+          altezzaMadre:
+            patient.altezzaMadre != null ? String(patient.altezzaMadre) : "",
         });
       } else {
         setError("Paziente non trovato");
@@ -185,6 +202,12 @@ export default function AddPatient() {
 
     try {
       const cfVal = registerData.cf.trim();
+      const parseOptionalNumber = (raw?: string) => {
+        const s = String(raw ?? "").trim();
+        if (!s) return undefined;
+        const n = Number.parseFloat(s);
+        return Number.isFinite(n) ? n : undefined;
+      };
       const payload = {
         ...(cfVal ? { codiceFiscale: cfVal.toUpperCase(), codiceFiscaleGenerato: false as const } : {}),
         nome: registerData.firstName.trim(),
@@ -195,6 +218,9 @@ export default function AddPatient() {
         email: registerData.email.trim() || undefined,
         telefono: registerData.phone.trim() || undefined,
         indirizzo: registerData.address.trim() || undefined,
+        peso: parseOptionalNumber(registerData.peso),
+        altezzaPadre: parseOptionalNumber(registerData.altezzaPadre),
+        altezzaMadre: parseOptionalNumber(registerData.altezzaMadre),
       };
       if (isEditMode && patientId) {
         await PatientService.updatePatient(patientId, payload);
@@ -355,6 +381,47 @@ export default function AddPatient() {
                 }}
                 description="Non tutti i pazienti hanno il codice fiscale. Se inserito, deve essere di 16 caratteri."
               />
+            </div>
+
+            <Divider />
+
+            {/* Dati Auxologici */}
+            <div>
+              <h3 className="text-lg font-medium text-gray-900 mb-4 bg-gray-50 p-2 rounded">
+                Dati Auxologici (paziente e genitori)
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <Input
+                  name="peso"
+                  type="number"
+                  label="Peso (kg, opzionale)"
+                  placeholder="es. 12.5"
+                  value={registerData.peso}
+                  onChange={handleChange}
+                  variant="bordered"
+                  classNames={{ label: "text-gray-700 font-medium" }}
+                />
+                <Input
+                  name="altezzaPadre"
+                  type="number"
+                  label="Altezza padre (cm, opzionale)"
+                  placeholder="es. 175"
+                  value={registerData.altezzaPadre}
+                  onChange={handleChange}
+                  variant="bordered"
+                  classNames={{ label: "text-gray-700 font-medium" }}
+                />
+                <Input
+                  name="altezzaMadre"
+                  type="number"
+                  label="Altezza madre (cm, opzionale)"
+                  placeholder="es. 162"
+                  value={registerData.altezzaMadre}
+                  onChange={handleChange}
+                  variant="bordered"
+                  classNames={{ label: "text-gray-700 font-medium" }}
+                />
+              </div>
             </div>
 
             <Divider />

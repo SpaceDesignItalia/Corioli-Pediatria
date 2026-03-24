@@ -38,6 +38,10 @@ import {
   UserIcon,
   FileTextIcon,
   CalendarIcon,
+  Award,
+  StickyNote,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { useParams, useNavigate } from "react-router-dom";
 import { format, parseISO } from "date-fns";
@@ -47,6 +51,7 @@ import {
   VisitService,
   DoctorService,
   RichiestaEsameService,
+  CertificatoService,
   TemplateService,
   PreferenceService,
 } from "../../services/OfflineServices";
@@ -56,6 +61,7 @@ import {
   Visit,
   Doctor,
   RichiestaEsameComplementare,
+  CertificatoPaziente,
   MedicalTemplate,
 } from "../../types/Storage";
 import { useToast } from "../../contexts/ToastContext";
@@ -79,6 +85,13 @@ function calculateAge(birthDateString: string): string {
   const m = today.getMonth() - birthDate.getMonth();
   if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) age--;
   return age.toString();
+}
+
+function getNotaBenePreview(text: string, maxChars: number = 120): string {
+  const trimmed = text.trim().replace(/\s+/g, " ");
+  if (!trimmed) return "";
+  if (trimmed.length <= maxChars) return trimmed;
+  return trimmed.slice(0, maxChars) + "…";
 }
 
 function blobToBase64(blob: Blob): Promise<string> {
@@ -151,16 +164,44 @@ export default function PatientHistory() {
   );
   const [modelloEsameSelezionato, setModelloEsameSelezionato] = useState("");
   const [savingEsame, setSavingEsame] = useState(false);
-  const [isIncludeImagesModalOpen, setIsIncludeImagesModalOpen] = useState(false);
-  const [includeImagesCount, setIncludeImagesCount] = useState(0);
-  const [pendingPrintVisit, setPendingPrintVisit] = useState<Visit | null>(null);
   const [previewPdfBlobUrl, setPreviewPdfBlobUrl] = useState<string | null>(null);
   const [previewPdfLoading, setPreviewPdfLoading] = useState(false);
   const [showDoctorPhoneInPdf, setShowDoctorPhoneInPdf] = useState(true);
   const [showDoctorEmailInPdf, setShowDoctorEmailInPdf] = useState(true);
   const [examTemplates, setExamTemplates] = useState<MedicalTemplate[]>([]);
+  const [certTemplates, setCertTemplates] = useState<MedicalTemplate[]>([]);
+  const [certificati, setCertificati] = useState<CertificatoPaziente[]>([]);
+  const [editingCertificato, setEditingCertificato] = useState<CertificatoPaziente | null>(null);
+  const [certTitolo, setCertTitolo] = useState("");
+  const [certData, setCertData] = useState(() => new Date().toISOString().slice(0, 10));
+  const [certDescrizione, setCertDescrizione] = useState("");
+  const [savingCertificato, setSavingCertificato] = useState(false);
+  const [rightColumnTab, setRightColumnTab] = useState<"esami" | "certificati">("esami");
+  const [selectedCertificatoPreview, setSelectedCertificatoPreview] =
+    useState<CertificatoPaziente | null>(null);
+  const [certificatoPreviewPdfBlobUrl, setCertificatoPreviewPdfBlobUrl] = useState<string | null>(null);
+  const [certificatoPreviewPdfLoading, setCertificatoPreviewPdfLoading] = useState(false);
+  const [certificatoPreviewFullscreen, setCertificatoPreviewFullscreen] = useState(false);
+  const [esamePreviewPdfBlobUrl, setEsamePreviewPdfBlobUrl] = useState<string | null>(null);
+  const [esamePreviewPdfLoading, setEsamePreviewPdfLoading] = useState(false);
+  const [esamePreviewFullscreen, setEsamePreviewFullscreen] = useState(false);
+  const {
+    isOpen: isCertificatoOpen,
+    onOpen: onCertificatoOpen,
+    onClose: onCertificatoClose,
+  } = useDisclosure();
+  const {
+    isOpen: isCertificatoPreviewOpen,
+    onOpen: onCertificatoPreviewOpen,
+    onClose: onCertificatoPreviewClose,
+  } = useDisclosure();
   const navigate = useNavigate();
   const { showToast } = useToast();
+
+  // Nota bene (sezione collassabile)
+  const [notaBeneLocal, setNotaBeneLocal] = useState("");
+  const [savingNotaBene, setSavingNotaBene] = useState(false);
+  const [isNotaBeneOpen, setIsNotaBeneOpen] = useState(false);
 
   const loadData = async () => {
     if (!patientIdParam) {
@@ -203,6 +244,9 @@ export default function PatientHistory() {
         patientData.id,
       );
       setRichiesteEsami(sortRichiesteEsamiByDateAndCreation(richieste));
+
+      const certList = await CertificatoService.getByPatientId(patientData.id);
+      setCertificati(certList);
     } catch (error) {
       console.error("Errore durante il recupero dei dati:", error);
       setError("Errore durante il recupero delle visite");
@@ -218,9 +262,121 @@ export default function PatientHistory() {
         setExamTemplates(
           results.filter((t) => t.category === "esame_complementare"),
         );
+        setCertTemplates(results.filter((t) => t.category === "certificato"));
       })
       .catch(console.error);
   }, [patientIdParam]);
+
+  useEffect(() => {
+    setNotaBeneLocal(patient?.notaBene ?? "");
+  }, [patient?.id, patient?.notaBene]);
+
+  const handleSaveNotaBene = async () => {
+    if (!patient) return;
+    setSavingNotaBene(true);
+    try {
+      await PatientService.updatePatient(patient.id, {
+        notaBene: notaBeneLocal.trim() || undefined,
+        updatedAt: new Date().toISOString(),
+      });
+      const updated = await PatientService.getPatientById(patient.id);
+      if (updated) setPatient(updated);
+      showToast("Nota salvata.");
+    } catch (err) {
+      console.error("Errore salvataggio nota:", err);
+      showToast("Errore nel salvataggio della nota.", "error");
+    } finally {
+      setSavingNotaBene(false);
+    }
+  };
+
+  // Anteprima certificato (PDF in iframe)
+  useEffect(() => {
+    if (!isCertificatoPreviewOpen || !selectedCertificatoPreview || !patient) {
+      setCertificatoPreviewPdfBlobUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return null;
+      });
+      setCertificatoPreviewPdfLoading(false);
+      return;
+    }
+
+    let revoked = false;
+    setCertificatoPreviewPdfLoading(true);
+
+    (async () => {
+      try {
+        const doc = await DoctorService.getDoctor();
+        const blob = await PdfService.generateCertificatoPDF(
+          patient,
+          selectedCertificatoPreview,
+          doc ?? null,
+        );
+        if (blob && !revoked) {
+          const url = URL.createObjectURL(blob);
+          setCertificatoPreviewPdfBlobUrl(url);
+        }
+      } catch (e) {
+        console.error("Errore generazione PDF certificato anteprima:", e);
+        if (!revoked) setCertificatoPreviewPdfBlobUrl(null);
+      } finally {
+        if (!revoked) setCertificatoPreviewPdfLoading(false);
+      }
+    })();
+
+    return () => {
+      revoked = true;
+      setCertificatoPreviewPdfBlobUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return null;
+      });
+      setCertificatoPreviewPdfLoading(false);
+    };
+  }, [isCertificatoPreviewOpen, selectedCertificatoPreview?.id, patient?.id]);
+
+  // Anteprima richiesta esame (PDF in iframe — stesso formato di Anteprima certificato)
+  useEffect(() => {
+    if (!isEsamePreviewOpen || !selectedRichiestaEsamePreview || !patient) {
+      setEsamePreviewPdfBlobUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return null;
+      });
+      setEsamePreviewPdfLoading(false);
+      return;
+    }
+
+    let revoked = false;
+    setEsamePreviewPdfLoading(true);
+
+    (async () => {
+      try {
+        const doc = await DoctorService.getDoctor();
+        const blob = await PdfService.generateRichiestaEsamePDF(
+          patient,
+          selectedRichiestaEsamePreview,
+          doc ?? null,
+        );
+        if (blob && !revoked) {
+          const url = URL.createObjectURL(blob);
+          setEsamePreviewPdfBlobUrl(url);
+        }
+      } catch (e) {
+        console.error("Errore generazione PDF richiesta esame anteprima:", e);
+        if (!revoked) setEsamePreviewPdfBlobUrl(null);
+      } finally {
+        if (!revoked) setEsamePreviewPdfLoading(false);
+      }
+    })();
+
+    return () => {
+      revoked = true;
+      setEsamePreviewPdfBlobUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return null;
+      });
+      setEsamePreviewPdfLoading(false);
+    };
+  }, [isEsamePreviewOpen, selectedRichiestaEsamePreview?.id, patient?.id]);
 
   useEffect(() => {
     PreferenceService.getPreferences()
@@ -249,9 +405,10 @@ export default function PatientHistory() {
     (async () => {
       try {
         // Will be implemented in PdfService.ts
-        const blob = await (PdfService as any).generatePediatricPDF?.(patient, selectedVisit, {
-          includeImages: true,
-        });
+        const blob = await (PdfService as any).generatePediatricPDF?.(
+          patient,
+          selectedVisit,
+        );
         if (blob && !revoked) {
           const url = URL.createObjectURL(blob);
           setPreviewPdfBlobUrl(url);
@@ -315,6 +472,7 @@ export default function PatientHistory() {
     if (!r) return;
     onEsamePreviewClose();
     setSelectedRichiestaEsamePreview(null);
+    setEsamePreviewFullscreen(false);
     handleOpenEditRichiestaEsame(r);
   };
 
@@ -413,6 +571,157 @@ export default function PatientHistory() {
     }
   };
 
+  const getCertificatoTipoLabel = (tipo: CertificatoPaziente["tipo"]) => {
+    const labels: Record<CertificatoPaziente["tipo"], string> = {
+      assenza_lavoro: "Assenza da scuola",
+      idoneita: "Idoneità scolastica",
+      malattia: "Malattia / assenza",
+      altro: "Altro",
+    };
+    return labels[tipo] ?? "Altro";
+  };
+
+  const refreshCertificati = async () => {
+    if (!patient) return;
+    const list = await CertificatoService.getByPatientId(patient.id);
+    setCertificati(list);
+  };
+
+  /** Tipo PDF dedotto da titolo + testo (senza campo dedicato in UI). */
+  const deriveCertTipoFromText = (titolo: string, descrizione: string): CertificatoPaziente["tipo"] => {
+    const raw = `${titolo} ${descrizione}`.toLowerCase();
+    if (raw.includes("idoneit")) return "idoneita";
+    if (raw.includes("assenza") || raw.includes("astensione")) return "assenza_lavoro";
+    if (raw.includes("malattia")) return "malattia";
+    return "altro";
+  };
+
+  const handleOpenNuovoCertificato = () => {
+    if (!ensureDoctorProfileComplete()) return;
+    setEditingCertificato(null);
+    setCertTitolo("");
+    setCertData(new Date().toISOString().slice(0, 10));
+    setCertDescrizione("");
+    onCertificatoOpen();
+  };
+
+  const handleOpenEditCertificato = (c: CertificatoPaziente) => {
+    setEditingCertificato(c);
+    setCertTitolo(c.titolo ?? "");
+    setCertData(c.dataCertificato?.slice(0, 10) || "");
+    setCertDescrizione(c.descrizione ?? "");
+    onCertificatoOpen();
+  };
+
+  const handleCloseCertificatoModal = () => {
+    onCertificatoClose();
+    setEditingCertificato(null);
+  };
+
+  const handleSaveCertificato = async () => {
+    if (!patient || !certDescrizione.trim()) return;
+    if (!ensureDoctorProfileComplete()) return;
+    setSavingCertificato(true);
+    try {
+      const tipo = deriveCertTipoFromText(certTitolo, certDescrizione.trim());
+      if (editingCertificato) {
+        await CertificatoService.update(editingCertificato.id, {
+          tipo,
+          titolo: certTitolo.trim() || undefined,
+          dataCertificato: certData,
+          descrizione: certDescrizione.trim(),
+        });
+        showToast("Certificato aggiornato.");
+      } else {
+        await CertificatoService.add({
+          patientId: patient.id,
+          tipo,
+          titolo: certTitolo.trim() || undefined,
+          dataCertificato: certData,
+          descrizione: certDescrizione.trim(),
+        });
+        showToast("Certificato salvato.");
+      }
+      await refreshCertificati();
+      handleCloseCertificatoModal();
+    } catch (e) {
+      console.error(e);
+      showToast("Errore nel salvataggio del certificato.", "error");
+    } finally {
+      setSavingCertificato(false);
+    }
+  };
+
+  const handleDeleteCertificato = async (id: string) => {
+    if (!confirm("Eliminare questo certificato?")) return;
+    try {
+      await CertificatoService.delete(id);
+      await refreshCertificati();
+      showToast("Certificato eliminato.");
+    } catch (e) {
+      console.error(e);
+      showToast("Errore nell'eliminazione del certificato.", "error");
+    }
+  };
+
+  const handleOpenCertificatoPreview = (c: CertificatoPaziente) => {
+    setSelectedCertificatoPreview(c);
+    onCertificatoPreviewOpen();
+  };
+
+  const handleCloseCertificatoPreview = () => {
+    onCertificatoPreviewClose();
+    setSelectedCertificatoPreview(null);
+  };
+
+  const handleFromCertificatoPreviewToEdit = () => {
+    const c = selectedCertificatoPreview;
+    if (!c) return;
+    handleCloseCertificatoPreview();
+    handleOpenEditCertificato(c);
+  };
+
+  const handlePrintCertificato = async (cert: CertificatoPaziente) => {
+    if (!patient) return;
+    setPdfLoading(true);
+    try {
+      const doc = await DoctorService.getDoctor();
+      const blob = await PdfService.generateCertificatoPDF(
+        patient,
+        cert,
+        doc ?? null,
+      );
+
+      const electronAPI = (
+        window as unknown as {
+          electronAPI?: { openPdfForPrint: (b64: string) => Promise<unknown> };
+        }
+      ).electronAPI;
+
+      if (electronAPI?.openPdfForPrint) {
+        const base64 = await blobToBase64(blob);
+        await electronAPI.openPdfForPrint(base64);
+        showToast("PDF aperto per la stampa.");
+      } else {
+        const url = URL.createObjectURL(blob);
+        const w = window.open(url, "_blank");
+        if (!w) {
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `Certificato_${patient.cognome}_${cert.dataCertificato}.pdf`;
+          a.click();
+          showToast("PDF scaricato.");
+        }
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+      }
+    } catch (e) {
+      console.error("Errore generazione PDF certificato:", e);
+      showToast("Errore durante la generazione del PDF.", "error");
+    } finally {
+      setPdfLoading(false);
+    }
+  };
+
   const handleDeleteVisit = async (visitId: string) => {
     if (
       !confirm(
@@ -495,6 +804,11 @@ export default function PatientHistory() {
       indirizzo: patient.indirizzo || "",
       telefono: patient.telefono || "",
       email: patient.email || "",
+      allergie: patient.allergie,
+      peso: patient.peso,
+      altezza: patient.altezza,
+      altezzaPadre: patient.altezzaPadre,
+      altezzaMadre: patient.altezzaMadre,
     });
     setSuccessMsg(null);
     onEditOpen();
@@ -545,7 +859,14 @@ export default function PatientHistory() {
     if (!patient) return;
     setPdfLoading(true);
     try {
-      const blob = await (PdfService as any).generatePediatricPDF?.(patient, visit);
+      const includeGrowthChart = window.confirm(
+        "Nel PDF vuoi includere il grafico andamento crescita?"
+      );
+      const blob = await (PdfService as any).generatePediatricPDF?.(
+        patient,
+        visit,
+        { includeGrowthChart },
+      );
       if (!blob) {
         showToast("Impossibile generare il PDF. PdfService non pronto.", "error");
         return;
@@ -569,26 +890,21 @@ export default function PatientHistory() {
 
   const handlePrintPdf = async (visit: Visit) => {
     if (!patient) return;
-
-    const imageCount = visit.pediatria?.immagini?.length ?? 0;
-
-    if (imageCount > 0) {
-      setIncludeImagesCount(imageCount);
-      setPendingPrintVisit(visit);
-      setIsIncludeImagesModalOpen(true);
-      return;
-    }
-
-    await runPrintPdf(visit, false);
+    await runPrintPdf(visit);
   };
 
-  const runPrintPdf = async (visit: Visit, includeImages: boolean) => {
+  const runPrintPdf = async (visit: Visit) => {
     if (!patient) return;
     setPdfLoading(true);
     try {
-      const blob = await (PdfService as any).generatePediatricPDF?.(patient, visit, {
-        includeImages,
-      });
+      const includeGrowthChart = window.confirm(
+        "Nel PDF vuoi includere il grafico andamento crescita?"
+      );
+      const blob = await (PdfService as any).generatePediatricPDF?.(
+        patient,
+        visit,
+        { includeGrowthChart },
+      );
 
       if (!blob) {
         showToast("Impossibile generare il PDF per la stampa.", "error");
@@ -628,19 +944,9 @@ export default function PatientHistory() {
     }
   };
 
-  const handleIncludeImagesChoice = async (include: boolean) => {
-    const visit = pendingPrintVisit;
-    setIsIncludeImagesModalOpen(false);
-    setPendingPrintVisit(null);
-    if (!visit) return;
-    await runPrintPdf(visit, include);
-  };
-
   const getVisitTypeLabel = (tipo?: Visit["tipo"]) => {
-    if (tipo === "bilancio_salute") return "Bilancio di Salute";
-    if (tipo === "patologia") return "Patologia";
+    if (tipo === "bilancio_salute") return "Visita pediatrica";
     if (tipo === "controllo") return "Controllo";
-    if (tipo === "urgenza") return "Urgenza";
     return "Generale";
   };
 
@@ -679,6 +985,19 @@ export default function PatientHistory() {
       { label: `${patient.nome} ${patient.cognome}` },
     ]
     : [];
+
+  const latestVisitHeight =
+    visits.find(
+      (v) => v.pediatria?.altezza != null && Number.isFinite(v.pediatria.altezza),
+    )?.pediatria?.altezza ?? null;
+  const latestVisitWeight =
+    visits.find(
+      (v) => v.pediatria?.peso != null && Number.isFinite(v.pediatria.peso),
+    )?.pediatria?.peso ?? null;
+  const displayedPatientHeight =
+    latestVisitHeight != null ? latestVisitHeight : patient.altezza ?? null;
+  const displayedPatientWeight =
+    latestVisitWeight != null ? latestVisitWeight : patient.peso ?? null;
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -733,6 +1052,53 @@ export default function PatientHistory() {
                       {patient.email && <span>✉️ {patient.email}</span>}
                     </div>
                   )}
+                <div className="mt-3 rounded-md border border-default-200 bg-default-50 p-3">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-default-600 mb-2">
+                    Dati Auxologici
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 text-sm">
+                    <div>
+                      <span className="text-default-500">Peso:</span>{" "}
+                      <span className="font-medium">
+                        {displayedPatientWeight != null
+                          ? `${displayedPatientWeight} kg`
+                          : "-"}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-default-500">Altezza paziente:</span>{" "}
+                      <span className="font-medium">
+                        {displayedPatientHeight != null
+                          ? `${displayedPatientHeight} cm`
+                          : "-"}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-default-500">Altezza padre:</span>{" "}
+                      <span className="font-medium">
+                        {patient.altezzaPadre != null
+                          ? `${patient.altezzaPadre} cm`
+                          : "-"}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-default-500">Altezza madre:</span>{" "}
+                      <span className="font-medium">
+                        {patient.altezzaMadre != null
+                          ? `${patient.altezzaMadre} cm`
+                          : "-"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                {patient.allergie && patient.allergie.trim() !== "" && (
+                  <div className="text-sm text-danger-500 pt-2 flex items-start gap-1">
+                    <span>⚠️</span>
+                    <span className="whitespace-pre-line">
+                      Allergie: {patient.allergie}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -752,6 +1118,79 @@ export default function PatientHistory() {
           </div>
         </CardBody>
       </Card>
+
+      {/* Nota bene */}
+      <div
+        className={`rounded-lg border transition-colors ${
+          notaBeneLocal.trim() || isNotaBeneOpen
+            ? "border-default-200 bg-default-50/30"
+            : "border-dashed border-default-200 bg-transparent hover:bg-default-50/20"
+        }`}
+      >
+        <button
+          type="button"
+          onClick={() => setIsNotaBeneOpen((prev) => !prev)}
+          className="flex items-center gap-2 w-full min-w-0 py-2 px-3 text-left"
+        >
+          <StickyNote
+            size={14}
+            className="text-default-400 shrink-0"
+          />
+          <span
+            className="text-xs text-default-500 flex-1 min-w-0"
+            style={{
+              display: "-webkit-box",
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: "vertical",
+              overflow: "hidden",
+            }}
+          >
+            {!notaBeneLocal.trim() && !isNotaBeneOpen
+              ? "Nota bene (amica, prezzi, familiarità…)"
+              : notaBeneLocal.trim()
+                ? getNotaBenePreview(notaBeneLocal)
+                : "Nota bene"}
+          </span>
+          <span className="text-default-400 shrink-0">
+            {isNotaBeneOpen ? (
+              <ChevronUp size={14} />
+            ) : (
+              <ChevronDown size={14} />
+            )}
+          </span>
+        </button>
+
+        {isNotaBeneOpen && (
+          <div className="px-3 pb-3 pt-0 border-t border-default-100">
+            <Textarea
+              placeholder="Es. Amica, prezzo speciale · Familiarità cancro · Richiamare al pomeriggio..."
+              value={notaBeneLocal}
+              onValueChange={setNotaBeneLocal}
+              variant="bordered"
+              minRows={2}
+              maxRows={4}
+              size="sm"
+              classNames={{
+                input: "text-sm",
+                inputWrapper: "bg-white border-default-200",
+              }}
+              className="w-full"
+            />
+            <Button
+              color="primary"
+              size="sm"
+              variant="flat"
+              onPress={handleSaveNotaBene}
+              isLoading={savingNotaBene}
+              isDisabled={savingNotaBene}
+              startContent={<SaveIcon size={14} />}
+              className="mt-2"
+            >
+              Salva
+            </Button>
+          </div>
+        )}
+      </div>
 
       {/* 2. Layout a Griglia: Visite a sinistra, Esami a destra */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -835,11 +1274,7 @@ export default function PatientHistory() {
                           color={
                             visit.tipo === "bilancio_salute"
                               ? "success"
-                              : visit.tipo === "patologia"
-                                ? "danger"
-                                : visit.tipo === "urgenza"
-                                  ? "warning"
-                                  : "primary"
+                              : "primary"
                           }
                           className="capitalize font-semibold"
                         >
@@ -912,104 +1347,240 @@ export default function PatientHistory() {
           )}
         </div>
 
-        {/* COLONNA DESTRA: ESAMI (1/3) */}
+        {/* COLONNA DESTRA: ESAMI / CERTIFICATI (1/3) */}
         <div className="lg:col-span-1 space-y-4">
-          <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-default-100 shadow-sm sticky top-4 z-10">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-secondary-50 text-secondary-600 rounded-lg">
-                <FlaskConical size={20} />
-              </div>
-              <div>
-                <h2 className="text-lg font-bold text-gray-900">Esami</h2>
-                <p className="text-xs text-gray-500">
-                  {richiesteEsami.length} registrati
-                </p>
-              </div>
-            </div>
-            <Button
-              color="secondary"
-              size="sm"
-              variant="flat"
-              onPress={handleOpenNuovaRichiestaEsame}
-              startContent={<PlusIcon size={18} />}
-            >
-              Nuovo Esame
-            </Button>
-          </div>
-
-          <div className="space-y-3 max-h-[calc(100vh-200px)] overflow-y-auto pr-1">
-            {richiesteEsami.length === 0 ? (
-              <Card className="bg-default-50 border-dashed border-default-300 shadow-none">
-                <CardBody className="text-center py-8 px-4">
-                  <p className="text-sm text-gray-500 mb-3">
-                    Nessuna prescrizione attiva.
-                  </p>
-                  <Button
-                    color="secondary"
-                    variant="flat"
-                    size="sm"
-                    onPress={handleOpenNuovaRichiestaEsame}
-                  >
-                    Crea Richiesta
-                  </Button>
-                </CardBody>
-              </Card>
-            ) : (
-              richiesteEsami.map((r) => (
-                <Card
-                  key={r.id}
-                  isPressable
-                  onPress={() => handleOpenEsamePreview(r)}
-                  className="border border-default-200 shadow-sm hover:border-secondary-300 group cursor-pointer w-full min-h-[7.5rem]"
+          <div className="sticky top-4 z-10 bg-white rounded-xl border border-default-100 shadow-sm overflow-hidden">
+            <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-default-100 bg-default-50/50">
+              <div className="flex gap-0 rounded-lg bg-default-100 p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setRightColumnTab("esami")}
+                  className={`flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                    rightColumnTab === "esami"
+                      ? "bg-white text-secondary-700 shadow-sm"
+                      : "text-default-600 hover:text-default-800"
+                  }`}
                 >
-                  <CardBody className="p-3 min-h-[7.5rem] flex flex-col">
-                    <div className="flex justify-between items-start mb-2">
-                      <span className="text-[10px] font-bold text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded uppercase tracking-wider">
-                        {formatVisitDate(r.dataRichiesta)}
-                      </span>
-                      <div
-                        className="flex gap-1 flex-shrink-0"
-                        onClick={(e) => e.stopPropagation()}
-                      >
+                  <FlaskConical size={16} />
+                  Esami
+                  <span
+                    className={`text-xs ${
+                      rightColumnTab === "esami"
+                        ? "text-secondary-600"
+                        : "text-default-500"
+                    }`}
+                  >
+                    {richiesteEsami.length}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRightColumnTab("certificati")}
+                  className={`flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                    rightColumnTab === "certificati"
+                      ? "bg-white text-warning-700 shadow-sm"
+                      : "text-default-600 hover:text-default-800"
+                  }`}
+                >
+                  <Award size={16} />
+                  Certificati
+                  <span
+                    className={`text-xs ${
+                      rightColumnTab === "certificati"
+                        ? "text-warning-600"
+                        : "text-default-500"
+                    }`}
+                  >
+                    {certificati.length}
+                  </span>
+                </button>
+              </div>
+
+              {rightColumnTab === "esami" ? (
+                <Button
+                  color="secondary"
+                  size="sm"
+                  variant="flat"
+                  className="flex-shrink-0 font-medium"
+                  onPress={handleOpenNuovaRichiestaEsame}
+                  startContent={<PlusIcon size={16} />}
+                >
+                  Nuovo Esame
+                </Button>
+              ) : (
+                <Button
+                  color="warning"
+                  size="sm"
+                  variant="flat"
+                  className="flex-shrink-0 font-medium"
+                  onPress={handleOpenNuovoCertificato}
+                  startContent={<PlusIcon size={16} />}
+                >
+                  Nuovo Certificato
+                </Button>
+              )}
+            </div>
+
+            <div className="space-y-3 max-h-[calc(100vh-200px)] overflow-y-auto pr-1 p-3">
+              {rightColumnTab === "esami" && (
+                <>
+                  {richiesteEsami.length === 0 ? (
+                    <Card className="bg-default-50 border-dashed border-default-300 shadow-none">
+                      <CardBody className="text-center py-8 px-4">
+                        <p className="text-sm text-gray-500 mb-3">
+                          Nessuna prescrizione attiva.
+                        </p>
                         <Button
-                          size="sm"
-                          color="primary"
-                          variant="light"
-                          isIconOnly
-                          className="h-6 w-6 min-w-0"
-                          onPress={() => handleOpenEditRichiestaEsame(r)}
-                          title="Modifica"
-                        >
-                          <EditIcon size={14} />
-                        </Button>
-                        <Button
-                          size="sm"
                           color="secondary"
-                          variant="light"
-                          isIconOnly
-                          className="h-6 w-6 min-w-0"
-                          onPress={() => handlePrintRichiestaEsame(r)}
-                          isLoading={pdfLoading}
-                          title="Stampa PDF"
+                          variant="flat"
+                          size="sm"
+                          onPress={handleOpenNuovaRichiestaEsame}
                         >
-                          <Printer size={14} />
+                          Crea Richiesta
                         </Button>
-                      </div>
-                    </div>
-                    <h4 className="font-semibold text-gray-800 text-sm leading-snug mb-1 break-words">
-                      {r.nome}
-                    </h4>
-                    {r.note ? (
-                      <p className="text-xs text-gray-500 bg-gray-50 p-1.5 rounded border border-gray-100 break-words line-clamp-3">
-                        {r.note}
-                      </p>
-                    ) : (
-                      <div className="flex-1 min-h-[1.5rem]" />
-                    )}
-                  </CardBody>
-                </Card>
-              ))
-            )}
+                      </CardBody>
+                    </Card>
+                  ) : (
+                    richiesteEsami.map((r) => (
+                      <Card
+                        key={r.id}
+                        isPressable
+                        onPress={() => handleOpenEsamePreview(r)}
+                        className="border border-default-200 shadow-sm hover:border-secondary-300 group cursor-pointer w-full min-h-[7.5rem]"
+                      >
+                        <CardBody className="p-3 min-h-[7.5rem] flex flex-col">
+                          <div className="flex justify-between items-start mb-2">
+                            <span className="text-[10px] font-bold text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded uppercase tracking-wider">
+                              {formatVisitDate(r.dataRichiesta)}
+                            </span>
+                            <div
+                              className="flex gap-1 flex-shrink-0"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <Button
+                                size="sm"
+                                color="primary"
+                                variant="light"
+                                isIconOnly
+                                className="h-6 w-6 min-w-0"
+                                onPress={() =>
+                                  handleOpenEditRichiestaEsame(r)
+                                }
+                                title="Modifica"
+                              >
+                                <EditIcon size={14} />
+                              </Button>
+                              <Button
+                                size="sm"
+                                color="secondary"
+                                variant="light"
+                                isIconOnly
+                                className="h-6 w-6 min-w-0"
+                                onPress={() => handlePrintRichiestaEsame(r)}
+                                isLoading={pdfLoading}
+                                title="Stampa PDF"
+                              >
+                                <Printer size={14} />
+                              </Button>
+                            </div>
+                          </div>
+                          <h4 className="font-semibold text-gray-800 text-sm leading-snug mb-1 break-words">
+                            {r.nome}
+                          </h4>
+                          {r.note ? (
+                            <p className="text-xs text-gray-500 bg-gray-50 p-1.5 rounded border border-gray-100 break-words line-clamp-3">
+                              {r.note}
+                            </p>
+                          ) : (
+                            <div className="flex-1 min-h-[1.5rem]" />
+                          )}
+                        </CardBody>
+                      </Card>
+                    ))
+                  )}
+                </>
+              )}
+
+              {rightColumnTab === "certificati" && (
+                <>
+                  {certificati.length === 0 ? (
+                    <Card className="bg-default-50 border-dashed border-default-300 shadow-none">
+                      <CardBody className="text-center py-8 px-4">
+                        <p className="text-sm text-gray-500 mb-3">
+                          Nessun certificato.
+                        </p>
+                        <Button
+                          color="warning"
+                          variant="flat"
+                          size="sm"
+                          onPress={handleOpenNuovoCertificato}
+                        >
+                          Aggiungi certificato
+                        </Button>
+                      </CardBody>
+                    </Card>
+                  ) : (
+                    certificati
+                      .slice()
+                      .sort((a, b) => new Date(b.dataCertificato).getTime() - new Date(a.dataCertificato).getTime())
+                      .map((c) => (
+                        <Card
+                          key={c.id}
+                          isPressable
+                          onPress={() => handleOpenCertificatoPreview(c)}
+                          className="border border-default-200 shadow-sm hover:border-warning-300 group cursor-pointer w-full min-h-[5rem]"
+                        >
+                          <CardBody className="p-3 min-h-[5rem] flex flex-col">
+                            <div className="flex justify-between items-start mb-1 gap-2">
+                              <span className="text-[10px] font-bold text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded uppercase tracking-wider shrink-0">
+                                {format(parseISO(c.dataCertificato), "dd MMM yyyy", {
+                                  locale: it,
+                                })}
+                              </span>
+                              <div
+                                className="flex gap-1 flex-shrink-0"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <Button
+                                  size="sm"
+                                  color="primary"
+                                  variant="light"
+                                  isIconOnly
+                                  className="h-6 w-6 min-w-0"
+                                  onPress={() => handleOpenEditCertificato(c)}
+                                  title="Modifica"
+                                >
+                                  <EditIcon size={14} />
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  color="warning"
+                                  variant="light"
+                                  isIconOnly
+                                  className="h-6 w-6 min-w-0"
+                                  onPress={() => handlePrintCertificato(c)}
+                                  isLoading={pdfLoading}
+                                  title="Stampa PDF"
+                                >
+                                  <Printer size={14} />
+                                </Button>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1.5 mb-1">
+                              <Chip size="sm" variant="flat" color="warning" className="text-[10px]">
+                                {getCertificatoTipoLabel(c.tipo)}
+                              </Chip>
+                            </div>
+                            <p className="text-xs text-gray-700 line-clamp-2 break-words">
+                              {c.descrizione || "-"}
+                            </p>
+                          </CardBody>
+                        </Card>
+                      ))
+                  )}
+                </>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -1019,14 +1590,27 @@ export default function PatientHistory() {
         isOpen={isOpen}
         onClose={onClose}
         size={previewFullscreen ? "full" : "5xl"}
-        scrollBehavior="inside"
+        /* "inside" applica max-h-[calc(100%_-_8rem)] al pannello → fascia bianca in basso in fullscreen */
+        scrollBehavior={previewFullscreen ? "normal" : "inside"}
         classNames={
           previewFullscreen
-            ? { base: "m-0 max-w-[100vw] max-h-[100vh] rounded-none" }
+            ? {
+                base: "m-0 max-w-[100vw] rounded-none",
+                wrapper: "items-stretch p-0",
+                header: "shrink-0",
+                body: "!flex-1 min-h-0 overflow-hidden flex flex-col !pb-2",
+                footer: "shrink-0 border-t border-default-200",
+              }
             : undefined
         }
       >
-        <ModalContent>
+        <ModalContent
+          className={
+            previewFullscreen
+              ? "flex flex-col min-h-0 h-full max-h-full overflow-hidden"
+              : undefined
+          }
+        >
           {selectedVisit && (
             <>
               <ModalHeader className="flex flex-col gap-1">
@@ -1038,11 +1622,7 @@ export default function PatientHistory() {
                     color={
                       selectedVisit.tipo === "bilancio_salute"
                         ? "success"
-                        : selectedVisit.tipo === "patologia"
-                          ? "danger"
-                          : selectedVisit.tipo === "urgenza"
-                            ? "warning"
-                            : "primary"
+                        : "primary"
                     }
                     variant="flat"
                   >
@@ -1050,17 +1630,33 @@ export default function PatientHistory() {
                   </Chip>
                 </div>
               </ModalHeader>
-              <ModalBody>
+              <ModalBody
+                className={
+                  previewFullscreen
+                    ? "flex-1 flex flex-col min-h-0 overflow-hidden"
+                    : undefined
+                }
+              >
                 {previewPdfLoading ? (
                   <div className="flex justify-center items-center min-h-[60vh]">
                     <Spinner size="lg" color="primary" label="Generazione anteprima PDF..." />
                   </div>
                 ) : previewPdfBlobUrl ? (
-                  <div className="bg-[#e5e5e5] rounded-lg p-2 flex flex-col min-h-[70vh]">
+                  <div
+                    className={
+                      previewFullscreen
+                        ? "flex-1 min-h-0 flex flex-col rounded-lg p-2 bg-[#e5e5e5]"
+                        : "bg-[#e5e5e5] rounded-lg p-2 flex flex-col min-h-[70vh]"
+                    }
+                  >
                     <iframe
                       src={previewPdfBlobUrl}
                       title="Anteprima referto pediatric"
-                      className="flex-1 w-full min-h-[70vh] rounded border border-gray-300 bg-white"
+                      className={
+                        previewFullscreen
+                          ? "flex-1 w-full min-h-0 rounded border-0 bg-white"
+                          : "flex-1 w-full min-h-[70vh] rounded border border-gray-300 bg-white"
+                      }
                     />
                   </div>
                 ) : (
@@ -1257,6 +1853,76 @@ export default function PatientHistory() {
                 className="md:col-span-2"
               />
             </div>
+
+            <Divider className="my-2" />
+
+            <p className="text-sm font-medium text-gray-500">Allergie (opzionali)</p>
+            <div className="mt-2">
+              <Textarea
+                label="Allergie / Intolleranze"
+                placeholder="Elenca eventuali allergie a farmaci, alimenti, ecc."
+                value={editData.allergie || ""}
+                onValueChange={(v) =>
+                  setEditData((prev) => ({ ...prev, allergie: v }))
+                }
+                variant="bordered"
+                minRows={2}
+              />
+            </div>
+
+            <Divider className="my-2" />
+            <p className="text-sm font-medium text-gray-500">Dati Auxologici</p>
+
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <Input
+                label="Peso (kg, opzionale)"
+                type="number"
+                value={editData.peso?.toString() || ""}
+                onValueChange={(v) =>
+                  setEditData((prev) => ({
+                    ...prev,
+                    peso: v === "" ? undefined : parseFloat(v) || undefined,
+                  }))
+                }
+                variant="bordered"
+              />
+              <Input
+                label="Altezza paziente (cm, opzionale)"
+                type="number"
+                value={editData.altezza?.toString() || ""}
+                onValueChange={(v) =>
+                  setEditData((prev) => ({
+                    ...prev,
+                    altezza: v === "" ? undefined : parseFloat(v) || undefined,
+                  }))
+                }
+                variant="bordered"
+              />
+              <Input
+                label="Altezza padre (cm, opzionale)"
+                type="number"
+                value={editData.altezzaPadre?.toString() || ""}
+                onValueChange={(v) =>
+                  setEditData((prev) => ({
+                    ...prev,
+                    altezzaPadre: v === "" ? undefined : parseFloat(v) || undefined,
+                  }))
+                }
+                variant="bordered"
+              />
+              <Input
+                label="Altezza madre (cm, opzionale)"
+                type="number"
+                value={editData.altezzaMadre?.toString() || ""}
+                onValueChange={(v) =>
+                  setEditData((prev) => ({
+                    ...prev,
+                    altezzaMadre: v === "" ? undefined : parseFloat(v) || undefined,
+                  }))
+                }
+                variant="bordered"
+              />
+            </div>
           </ModalBody>
           <ModalFooter className="flex justify-between items-center">
             <Button
@@ -1291,135 +1957,365 @@ export default function PatientHistory() {
         </ModalContent>
       </Modal>
 
-      {/* Modal Anteprima esame = stesso layout del PDF stampato */}
+      {/* ── Modal Anteprima certificato = PDF in iframe ── */}
+      <Modal
+        isOpen={isCertificatoPreviewOpen}
+        onClose={() => {
+          handleCloseCertificatoPreview();
+          setCertificatoPreviewFullscreen(false);
+        }}
+        size={certificatoPreviewFullscreen ? "full" : "5xl"}
+        scrollBehavior={certificatoPreviewFullscreen ? "normal" : "inside"}
+        classNames={
+          certificatoPreviewFullscreen
+            ? {
+                base: "m-0 max-w-[100vw] rounded-none",
+                wrapper: "items-stretch p-0",
+                header: "shrink-0",
+                body: "!flex-1 min-h-0 overflow-hidden flex flex-col !pb-2",
+                footer: "shrink-0 border-t border-default-200",
+              }
+            : undefined
+        }
+      >
+        <ModalContent
+          className={
+            certificatoPreviewFullscreen
+              ? "flex flex-col min-h-0 h-full max-h-full overflow-hidden"
+              : undefined
+          }
+        >
+          {selectedCertificatoPreview && patient && (
+            <>
+              <ModalHeader className="flex flex-col gap-1">
+                <div className="flex items-center justify-between w-full">
+                  <div className="flex items-center gap-2">
+                    <Award size={22} className="text-warning-600" />
+                    <h2 className="text-xl font-bold">Anteprima certificato</h2>
+                  </div>
+                  <Chip
+                    size="sm"
+                    variant="flat"
+                    color="warning"
+                  >
+                    {getCertificatoTipoLabel(selectedCertificatoPreview.tipo)}
+                  </Chip>
+                </div>
+              </ModalHeader>
+
+              <ModalBody
+                className={
+                  certificatoPreviewFullscreen
+                    ? "flex-1 flex flex-col min-h-0 overflow-hidden"
+                    : undefined
+                }
+              >
+                {certificatoPreviewPdfLoading ? (
+                  <div className="flex justify-center items-center min-h-[60vh]">
+                    <Spinner
+                      size="lg"
+                      color="primary"
+                      label="Generazione anteprima PDF..."
+                    />
+                  </div>
+                ) : certificatoPreviewPdfBlobUrl ? (
+                  <div
+                    className={
+                      certificatoPreviewFullscreen
+                        ? "flex-1 min-h-0 flex flex-col rounded-lg p-2 bg-[#e5e5e5]"
+                        : "bg-[#e5e5e5] rounded-lg p-2 flex flex-col min-h-[70vh]"
+                    }
+                  >
+                    <iframe
+                      src={certificatoPreviewPdfBlobUrl}
+                      title="Anteprima certificato"
+                      className={
+                        certificatoPreviewFullscreen
+                          ? "flex-1 w-full min-h-0 rounded border-0 bg-white"
+                          : "flex-1 w-full min-h-[70vh] rounded border border-gray-300 bg-white"
+                      }
+                    />
+                  </div>
+                ) : (
+                  <div className="flex justify-center items-center min-h-[60vh] text-default-500">
+                    Anteprima non disponibile.
+                  </div>
+                )}
+              </ModalBody>
+
+              <ModalFooter
+                className={
+                  certificatoPreviewFullscreen
+                    ? "gap-2 flex-wrap"
+                    : "border-t border-default-200 gap-2 flex-wrap"
+                }
+              >
+                <Button
+                  color="danger"
+                  variant="light"
+                  className="mr-auto"
+                  startContent={<Trash2Icon size={18} />}
+                  onPress={async () => {
+                    if (!selectedCertificatoPreview) return;
+                    await handleDeleteCertificato(
+                      selectedCertificatoPreview.id,
+                    );
+                    handleCloseCertificatoPreview();
+                  }}
+                  aria-label="Elimina certificato"
+                  title="Elimina certificato"
+                >
+                  Elimina
+                </Button>
+                <Button
+                  variant="light"
+                  startContent={
+                    certificatoPreviewFullscreen ? (
+                      <Minimize2 size={16} />
+                    ) : (
+                      <Maximize2 size={16} />
+                    )
+                  }
+                  onPress={() =>
+                    setCertificatoPreviewFullscreen(
+                      !certificatoPreviewFullscreen,
+                    )
+                  }
+                >
+                  {certificatoPreviewFullscreen ? "Riduci" : "Espandi"}
+                </Button>
+                <Button
+                  color="warning"
+                  variant="flat"
+                  startContent={<Printer size={18} />}
+                  onPress={() =>
+                    selectedCertificatoPreview &&
+                    handlePrintCertificato(selectedCertificatoPreview)
+                  }
+                  isLoading={pdfLoading}
+                >
+                  Stampa PDF
+                </Button>
+                <Button
+                  color="primary"
+                  startContent={<EditIcon size={18} />}
+                  onPress={handleFromCertificatoPreviewToEdit}
+                >
+                  Modifica
+                </Button>
+              </ModalFooter>
+            </>
+          )}
+        </ModalContent>
+      </Modal>
+
+      {/* ── Modal Nuovo/Modifica Certificato (pediatria / minore) ── */}
+      <Modal
+        isOpen={isCertificatoOpen}
+        onClose={handleCloseCertificatoModal}
+        size="2xl"
+        scrollBehavior="inside"
+      >
+        <ModalContent>
+          <ModalHeader className="flex items-center gap-2 pb-2">
+            <Award size={22} className="text-warning-600 shrink-0" />
+            <span className="text-lg font-semibold">
+              {editingCertificato ? "Modifica certificato" : "Nuovo certificato"}
+            </span>
+          </ModalHeader>
+
+          <ModalBody className="gap-5 pb-6">
+            {certTemplates.length > 0 && (
+              <div className="flex justify-end">
+                <Dropdown>
+                  <DropdownTrigger>
+                    <Button
+                      size="sm"
+                      variant="flat"
+                      color="warning"
+                      startContent={<ClipboardList size={16} />}
+                    >
+                      Modelli certificato
+                    </Button>
+                  </DropdownTrigger>
+                  <DropdownMenu
+                    aria-label="Modelli certificato"
+                    onAction={(key) => {
+                      const t = certTemplates.find((x) => x.id === key);
+                      if (t) {
+                        setCertTitolo(t.label);
+                        setCertDescrizione(t.text);
+                      }
+                    }}
+                    className="max-h-[300px] overflow-y-auto"
+                  >
+                    {certTemplates.map((t) => (
+                      <DropdownItem
+                        key={t.id}
+                        description={
+                          t.note
+                            ? t.note.length > 50
+                              ? t.note.substring(0, 50) + "..."
+                              : t.note
+                            : ""
+                        }
+                      >
+                        {t.label}
+                      </DropdownItem>
+                    ))}
+                  </DropdownMenu>
+                </Dropdown>
+              </div>
+            )}
+
+            <Input
+              label="Titolo certificato (intestazione PDF)"
+              placeholder="Es. Certificato di assenza da scuola"
+              value={certTitolo}
+              onValueChange={setCertTitolo}
+              variant="bordered"
+            />
+
+            <Textarea
+              label="Testo del certificato"
+              placeholder="Es. Si certifica che il/la minore [nome] necessita di astensione dalla frequenza scolastica dal ... al ..."
+              value={certDescrizione}
+              onValueChange={setCertDescrizione}
+              variant="bordered"
+              minRows={5}
+            />
+
+            <Input
+              type="date"
+              label="Data certificato"
+              value={certData}
+              onValueChange={setCertData}
+              variant="bordered"
+            />
+          </ModalBody>
+
+          <ModalFooter>
+            {editingCertificato ? (
+              <Button
+                color="danger"
+                variant="light"
+                startContent={<Trash2Icon size={18} />}
+                onPress={() => handleDeleteCertificato(editingCertificato.id)}
+              >
+                Elimina
+              </Button>
+            ) : (
+              <div />
+            )}
+            <div className="flex-1" />
+            <Button variant="light" onPress={handleCloseCertificatoModal}>
+              Annulla
+            </Button>
+            <Button
+              color="warning"
+              onPress={handleSaveCertificato}
+              isDisabled={!certDescrizione.trim()}
+              isLoading={savingCertificato}
+              startContent={
+                editingCertificato ? <SaveIcon size={18} /> : <PlusIcon size={18} />
+              }
+            >
+              {editingCertificato ? "Salva modifiche" : "Salva certificato"}
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
+
+      {/* ── Modal Anteprima esame = PDF in iframe (stesso formato di Anteprima certificato) ── */}
       <Modal
         isOpen={isEsamePreviewOpen}
         onClose={() => {
           onEsamePreviewClose();
           setSelectedRichiestaEsamePreview(null);
+          setEsamePreviewFullscreen(false);
         }}
-        size="5xl"
-        scrollBehavior="inside"
+        size={esamePreviewFullscreen ? "full" : "5xl"}
+        scrollBehavior={esamePreviewFullscreen ? "normal" : "inside"}
+        classNames={
+          esamePreviewFullscreen
+            ? {
+                base: "m-0 max-w-[100vw] rounded-none",
+                wrapper: "items-stretch p-0",
+                header: "shrink-0",
+                body: "!flex-1 min-h-0 overflow-hidden flex flex-col !pb-2",
+                footer: "shrink-0 border-t border-default-200",
+              }
+            : undefined
+        }
       >
-        <ModalContent>
+        <ModalContent
+          className={
+            esamePreviewFullscreen
+              ? "flex flex-col min-h-0 h-full max-h-full overflow-hidden"
+              : undefined
+          }
+        >
           {selectedRichiestaEsamePreview && patient && (
             <>
-              <ModalHeader className="flex items-center gap-2 border-b border-default-200">
-                <FlaskConical size={22} className="text-secondary-600" />
-                <span>Anteprima esame</span>
-              </ModalHeader>
-              <ModalBody className="py-4">
-                <div className="bg-[#e5e5e5] rounded-lg p-4">
-                  <div className="mx-auto w-full max-w-[210mm] bg-white border border-gray-300 shadow-sm text-[#141414] font-sans">
-                    {/* Header come PDF: Dottore, specializzazione, linea, titolo */}
-                    <div className="text-center pt-4 pb-2">
-                      <p className="text-base font-bold uppercase tracking-tight text-[#141414]">
-                        {doctor
-                          ? `Dott. ${doctor.nome} ${doctor.cognome}`
-                          : "Studio Medico"}
-                      </p>
-                      {doctor?.specializzazione && (
-                        <p className="text-[11px] text-[#3c3c3c] uppercase mt-0.5">
-                          {doctor.specializzazione}
-                        </p>
-                      )}
-                      <div className="border-t border-gray-300 w-4/5 mx-auto my-2" />
-                      <p className="text-lg font-bold text-[#141414]">
-                        RICHIESTA ESAME COMPLEMENTARE
-                      </p>
-                      <p className="text-[11px] text-[#3c3c3c] mt-0.5">
-                        Prescrizione esame
-                      </p>
-                    </div>
-                    {/* Box paziente come PDF: DATI DEL PAZIENTE | DATA VISITA */}
-                    <div className="border border-gray-300 mx-4 mt-2">
-                      <div className="bg-[#f0f0f0] px-2 py-1.5 flex justify-between items-center text-[10px] font-bold text-[#3c3c3c]">
-                        <span>DATI DEL PAZIENTE</span>
-                        <span>
-                          DATA VISITA:{" "}
-                          {formatPdfDate(
-                            selectedRichiestaEsamePreview.dataRichiesta,
-                          )}
-                        </span>
-                      </div>
-                      <div className="px-2 py-2">
-                        <p className="text-sm font-bold text-[#141414]">
-                          {patient.nome} {patient.cognome}
-                        </p>
-                        <p className="text-[11px] text-[#3c3c3c] mt-0.5">
-                          Nato/a il: {formatPdfDate(patient.dataNascita)}
-                          {calculateAge(patient.dataNascita)
-                            ? ` (${calculateAge(patient.dataNascita)} anni)`
-                            : ""}
-                          {"   •   "}CF:{" "}
-                          <CodiceFiscaleValue
-                            value={patient.codiceFiscale}
-                            placeholder="-"
-                            generatedFromImport={Boolean(
-                              patient.codiceFiscaleGenerato,
-                            )}
-                          />
-                          {"   •   "}Sesso:{" "}
-                          {patient.sesso === "M"
-                            ? "M"
-                            : patient.sesso === "F"
-                              ? "F"
-                              : "-"}
-                        </p>
-                      </div>
-                    </div>
-                    {/* Sezione ESAME RICHIESTO come PDF */}
-                    <div className="mx-4 mt-3">
-                      <div className="bg-[#f0f0f0] px-2 py-1 font-bold text-[10px] uppercase text-[#3c3c3c]">
-                        ESAME RICHIESTO
-                      </div>
-                      <div className="px-2 py-2 border-x border-b border-gray-300">
-                        <p className="text-sm font-bold text-[#141414]">
-                          {selectedRichiestaEsamePreview.nome}
-                        </p>
-                        {selectedRichiestaEsamePreview.note?.trim() && (
-                          <p className="text-[9.5px] text-[#141414] mt-2 whitespace-pre-wrap">
-                            {selectedRichiestaEsamePreview.note}
-                          </p>
-                        )}
-                        <p className="text-[9px] text-[#3c3c3c] mt-2">
-                          Data richiesta:{" "}
-                          {formatPdfDate(
-                            selectedRichiestaEsamePreview.dataRichiesta,
-                          )}
-                        </p>
-                      </div>
-                    </div>
-                    {/* Footer come PDF */}
-                    <div className="border-t border-gray-300 mt-6 mx-4 pt-3 pb-4">
-                      <p className="text-[10px] text-[#3c3c3c] text-center">
-                        {(() => {
-                          const parts: string[] = [];
-                          if (
-                            doctor?.ambulatori &&
-                            doctor.ambulatori.length > 0
-                          ) {
-                            const amb =
-                              doctor.ambulatori.find((a) => a.isPrimario) ||
-                              doctor.ambulatori[0];
-                            parts.push(
-                              amb.nome,
-                              `${amb.indirizzo}, ${amb.citta}`,
-                            );
-                          }
-                          if (doctor?.telefono)
-                            parts.push(`Tel: ${doctor.telefono}`);
-                          if (doctor?.email) parts.push(doctor.email);
-                          if (showDoctorPhoneInPdf && doctor?.telefono) parts.push(`Tel: ${doctor.telefono}`);
-                          if (showDoctorEmailInPdf && doctor?.email) parts.push(doctor.email);
-                          return parts.length ? parts.join("  •  ") : "—";
-                        })()}
-                      </p>
-                    </div>
+              <ModalHeader className="flex flex-col gap-1">
+                <div className="flex items-center justify-between w-full">
+                  <div className="flex items-center gap-2">
+                    <FlaskConical size={22} className="text-secondary-600" />
+                    <h2 className="text-xl font-bold">Anteprima esame</h2>
                   </div>
+                  <Chip size="sm" variant="flat" color="secondary">
+                    Richiesta esame
+                  </Chip>
                 </div>
+              </ModalHeader>
+
+              <ModalBody
+                className={
+                  esamePreviewFullscreen
+                    ? "flex-1 flex flex-col min-h-0 overflow-hidden"
+                    : undefined
+                }
+              >
+                {esamePreviewPdfLoading ? (
+                  <div className="flex justify-center items-center min-h-[60vh]">
+                    <Spinner
+                      size="lg"
+                      color="primary"
+                      label="Generazione anteprima PDF..."
+                    />
+                  </div>
+                ) : esamePreviewPdfBlobUrl ? (
+                  <div
+                    className={
+                      esamePreviewFullscreen
+                        ? "flex-1 min-h-0 flex flex-col rounded-lg p-2 bg-[#e5e5e5]"
+                        : "bg-[#e5e5e5] rounded-lg p-2 flex flex-col min-h-[70vh]"
+                    }
+                  >
+                    <iframe
+                      src={esamePreviewPdfBlobUrl}
+                      title="Anteprima richiesta esame"
+                      className={
+                        esamePreviewFullscreen
+                          ? "flex-1 w-full min-h-0 rounded border-0 bg-white"
+                          : "flex-1 w-full min-h-[70vh] rounded border border-gray-300 bg-white"
+                      }
+                    />
+                  </div>
+                ) : (
+                  <div className="flex justify-center items-center min-h-[60vh] text-default-500">
+                    Anteprima non disponibile.
+                  </div>
+                )}
               </ModalBody>
-              <ModalFooter className="border-t border-default-200 gap-2 justify-end flex-wrap">
+
+              <ModalFooter
+                className={
+                  esamePreviewFullscreen
+                    ? "gap-2 flex-wrap"
+                    : "border-t border-default-200 gap-2 flex-wrap"
+                }
+              >
                 <Button
                   color="danger"
                   variant="light"
@@ -1433,6 +2329,7 @@ export default function PatientHistory() {
                     if (deleted) {
                       onEsamePreviewClose();
                       setSelectedRichiestaEsamePreview(null);
+                      setEsamePreviewFullscreen(false);
                     }
                   }}
                   aria-label="Elimina richiesta esame"
@@ -1441,7 +2338,22 @@ export default function PatientHistory() {
                   Elimina
                 </Button>
                 <Button
-                  color="secondary"
+                  variant="light"
+                  startContent={
+                    esamePreviewFullscreen ? (
+                      <Minimize2 size={16} />
+                    ) : (
+                      <Maximize2 size={16} />
+                    )
+                  }
+                  onPress={() =>
+                    setEsamePreviewFullscreen(!esamePreviewFullscreen)
+                  }
+                >
+                  {esamePreviewFullscreen ? "Riduci" : "Espandi"}
+                </Button>
+                <Button
+                  color="warning"
                   variant="flat"
                   startContent={<Printer size={18} />}
                   onPress={() =>
@@ -1587,36 +2499,6 @@ export default function PatientHistory() {
         </ModalContent>
       </Modal>
 
-      <Modal
-        isOpen={isIncludeImagesModalOpen}
-        onClose={() => handleIncludeImagesChoice(false)}
-        size="md"
-      >
-        <ModalContent>
-          <ModalHeader>Includere immagini?</ModalHeader>
-          <ModalBody>
-            <p className="text-sm text-gray-600">
-              Sono presenti{" "}
-              <span className="font-semibold">{includeImagesCount}</span>{" "}
-              immagini nella visita. Vuoi inserirle nel PDF di stampa?
-            </p>
-          </ModalBody>
-          <ModalFooter>
-            <Button
-              variant="light"
-              onPress={() => handleIncludeImagesChoice(false)}
-            >
-              No, genera senza immagini
-            </Button>
-            <Button
-              color="primary"
-              onPress={() => handleIncludeImagesChoice(true)}
-            >
-              Si, includi immagini
-            </Button>
-          </ModalFooter>
-        </ModalContent>
-      </Modal>
     </div>
   );
 }
